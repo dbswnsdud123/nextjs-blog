@@ -30,7 +30,7 @@ export const careers = [
     title: '이즐랩스',
     time: '24.05 ~ ',
     duration: getDurationString('2024-05'),
-    image: '/images/ezllabs.jpeg',
+    image: '/static/images/ezllabs.jpeg',
     skills: [
       'React Native',
       'TypeScript',
@@ -93,7 +93,7 @@ export const careers = [
     title: '지지큐컴퍼니',
     time: '20.01 ~ 23.06',
     duration: getDurationString('2020-01', '2023-06'),
-    image: '/images/ggq.jpeg',
+    image: '/static/images/ggq.jpeg',
     descriptions: [
       '리그오브레전드 게임 편의 기능 및 AI 코칭 서비스를 제공하며, MAU 100만 규모의 데스크톱 앱을 자체 개발·운영한 스타트업',
     ],

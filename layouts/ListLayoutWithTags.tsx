@@ -100,7 +100,7 @@ export default function ListLayoutWithTags({
                   All Posts
                 </Link>
               )}
-              <ul>
+              {/* <ul>
                 {sortedTags.map((t) => {
                   return (
                     <li key={t} className="my-3">
@@ -120,7 +120,7 @@ export default function ListLayoutWithTags({
                     </li>
                   )
                 })}
-              </ul>
+              </ul> */}
             </div>
           </div>
           <div>
@@ -146,7 +146,9 @@ export default function ListLayoutWithTags({
                             </Link>
                           </h2>
                           <div className="flex flex-wrap">
-                            {tags?.map((tag) => <Tag key={tag} text={tag} />)}
+                            {tags?.map((tag) => (
+                              <Tag key={tag} text={tag} />
+                            ))}
                           </div>
                         </div>
                         <div className="prose max-w-none text-gray-500 dark:text-gray-400">
