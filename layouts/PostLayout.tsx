@@ -53,28 +53,28 @@ export default function PostLayout({ content, authorDetails, next, prev, childre
                       {author.avatar && (
                         <Image
                           src={author.avatar}
-                          width={38}
-                          height={38}
+                          width={76}
+                          height={100}
                           alt="avatar"
-                          className="h-10 w-10 rounded-full"
+                          className="rounded-lg object-cover"
                         />
                       )}
                       <dl className="text-sm leading-5 font-medium whitespace-nowrap">
                         <dt className="sr-only">Name</dt>
                         <dd className="text-gray-900 dark:text-gray-100">{author.name}</dd>
                         <dt className="sr-only">Twitter</dt>
-                        <dd>
-                          {author.twitter && (
+                        {/* <dd>
+                          {author.linkedin && (
                             <Link
-                              href={author.twitter}
+                              href={author.linkedin}
                               className="text-primary-500 hover:text-primary-600 dark:hover:text-primary-400"
                             >
-                              {author.twitter
+                              {author.linkedin
                                 .replace('https://twitter.com/', '@')
                                 .replace('https://x.com/', '@')}
                             </Link>
                           )}
-                        </dd>
+                        </dd> */}
                       </dl>
                     </li>
                   ))}
