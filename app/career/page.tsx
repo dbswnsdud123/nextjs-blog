@@ -1,8 +1,8 @@
 import { genPageMetadata } from 'app/seo'
 
 import Chip from '@/components/Chip'
-import { careers } from './careers'
-import { Education, educations } from './educations'
+import { careers } from '@/data/career/careers'
+import { Education, educations } from '@/data/career/educations'
 import Profile from '@/components/Profile'
 
 export const metadata = genPageMetadata({ title: 'Career' })
@@ -10,16 +10,20 @@ export const metadata = genPageMetadata({ title: 'Career' })
 const EducationItem = ({ education }: { education: Education }) => {
   return (
     <>
-      <div className="mb-10 flex flex-row">
-        <div className="flex w-[250px] flex-col">
-          <p className="mb-[16px] text-[32px] font-bold">{education.time}</p>
+      <div className="mb-10 flex flex-col md:flex-row">
+        <div className="mb-2 flex w-full flex-col md:mb-0 md:w-[250px]">
+          <p className="mb-[8px] text-[24px] font-bold md:mb-[16px] md:text-[32px]">
+            {education.time}
+          </p>
         </div>
         <div className="flex flex-1 flex-col">
-          <p className="mb-[16px] text-[32px] font-bold">{education.title}</p>
+          <p className="mb-[8px] text-[24px] font-bold md:mb-[16px] md:text-[32px]">
+            {education.title}
+          </p>
 
           {education.descriptions.map((descripion) => {
             return (
-              <p key={descripion} className="mb-[4px] text-[14px]">
+              <p key={descripion} className="mb-[2px] text-[12px] md:mb-[4px] md:text-[14px]">
                 {descripion}
               </p>
             )
@@ -32,12 +36,12 @@ const EducationItem = ({ education }: { education: Education }) => {
 
 export default function Page() {
   return (
-    <>
+    <main>
       <Profile />
       {/*  */}
       <section id="introduce" className="mb-[40px] flex flex-col">
         <p className="mb-[20px] text-[40px] font-bold text-yellow-300">INTRODUCE</p>
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-4">
           <li>
             <p>
               React Native, Electron, Web을 넘나들며 플랫폼에 구애받지 않는 문제 해결에 강한
@@ -56,15 +60,24 @@ export default function Page() {
         </ul>
       </section>
       {/*  */}
+      <p className="mb-[20px] text-[40px] font-bold text-yellow-300">CAREER</p>
       {careers.map((career) => {
         return (
-          <section key={career.title} className="mb-10 flex flex-row">
-            <div className="flex w-[250px] flex-col">
-              <p className="mb-[16px] text-[32px] font-bold">{career.time}</p>
-              <div className="flex flex-row items-center">
-                <Chip text={career.duration} />
+          <section
+            key={career.title}
+            className="mb-10 flex w-full flex-col items-center md:flex-row md:items-start"
+          >
+            {/* 좌측: 기간, 로고 */}
+            <div className="flex w-full flex-row md:mb-0 md:w-[250px] md:flex-col md:items-start">
+              <div className="flex w-full flex-col md:items-center md:items-start">
+                <p className="mb-[8px] text-[24px] font-bold md:mb-[16px] md:text-[32px]">
+                  {career.time}
+                </p>
+                <div className="mb-4 flex flex-row items-center md:mb-0">
+                  <Chip text={career.duration} />
+                </div>
               </div>
-              <div className="mt-10 flex flex-row">
+              <div className="flex flex-row md:mt-10">
                 <img
                   src={career.image}
                   alt="logo"
@@ -74,16 +87,20 @@ export default function Page() {
                 />
               </div>
             </div>
-            <div className="flex flex-1 flex-col">
-              <p className="mb-4 text-[32px] font-bold">{career.title}</p>
+            {/* 우측: 내용 */}
+            <div className="flex w-full flex-1 flex-col">
+              <p className="mb-4 text-[20px] text-[32px] font-bold">{career.title}</p>
               {career.descriptions.map((descripion) => {
                 return (
-                  <p key={descripion} className="mb-[4px] text-[14px] text-[#70767E]">
+                  <p
+                    key={descripion}
+                    className="mb-[4px] text-[13px] text-[#70767E] md:text-[14px]"
+                  >
                     {descripion}
                   </p>
                 )
               })}
-              <div className="mt-5 flex max-w-[600px] flex-row flex-wrap gap-[8px]">
+              <div className="mt-5 flex max-w-full flex-row flex-wrap gap-[8px] md:max-w-[600px]">
                 {career.skills.map((skill) => {
                   return <Chip key={skill} text={skill} />
                 })}
@@ -94,13 +111,13 @@ export default function Page() {
                   {career.dos.map((item, index) => {
                     return (
                       <div key={item.problem}>
-                        <li key={item.problem}>
+                        <li>
                           <div className="mb-1 flex flex-row">
                             <p className="max-w-[80px] min-w-[80px]">Project:</p>
                             <p>{item.project}</p>
                           </div>
                           <div className="my-2 flex flex-row">
-                            <p className="text-[14px] text-[#70767E]">{item.role}</p>
+                            <p className="text-[13px] text-[#70767E] md:text-[14px]">{item.role}</p>
                           </div>
                           <div className="mb-2 ml-4 flex flex-row">
                             <p className="max-w-[80px] min-w-[80px]">Problem:</p>
@@ -124,7 +141,7 @@ export default function Page() {
 
               {career.etcs.length != 0 && (
                 <>
-                  <p className="mt-3 mb-2 text-[18px] font-bold">ETC.</p>
+                  <p className="mt-3 mb-2 text-[16px] font-bold md:text-[18px]">ETC.</p>
                   <ul className="mb-2 ml-[20px] list-disc">
                     {career.etcs.map((etc) => {
                       return (
@@ -142,11 +159,11 @@ export default function Page() {
       })}
       {/*  */}
       <section id="introduce" className="mb-[40px] flex flex-col">
-        <p className="mb-[20px] text-[40px] font-bold text-[#BD871F]">EDUCATION</p>
+        <p className="mb-[20px] text-[40px] font-bold text-yellow-300">EDUCATION</p>
         {educations.map((education) => {
           return <EducationItem key={education.title} education={education} />
         })}
       </section>
-    </>
+    </main>
   )
 }

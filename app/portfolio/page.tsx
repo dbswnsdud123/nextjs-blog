@@ -1,7 +1,7 @@
 import { genPageMetadata } from 'app/seo'
 
 import Chip from '@/components/Chip'
-import { Portfolio, portfolios } from './portfolio'
+import { Portfolio, portfolios } from '@/data/portfolio/portfolio'
 import createDOMPurify from 'dompurify'
 import { JSDOM } from 'jsdom'
 import Profile from '@/components/Profile'
@@ -15,7 +15,7 @@ const PortfolioItem = ({ portfolio, index }: { portfolio: Portfolio; index: numb
   return (
     <>
       <div className="mb-[80px] flex flex-col">
-        <div className="mb-[20px] flex flex-row items-center">
+        <div className="mb-[20px] flex flex-col items-center md:flex-row md:items-center">
           <p className="mr-3 text-[24px] font-bold">
             {index + 1}. {portfolio.title}
           </p>
@@ -41,14 +41,15 @@ const PortfolioItem = ({ portfolio, index }: { portfolio: Portfolio; index: numb
           })}
         </div>
 
-        <div className="flex flex-row">
+        <div className="flex flex-col md:flex-row">
           <div
             className="flex flex-1 flex-col"
             dangerouslySetInnerHTML={{
               __html: DOMPurify.sanitize(portfolio.html),
             }}
           ></div>
-          <div className="mx-3 min-h-[100%] w-[1px] bg-[#bec4cd]"></div>
+          <div className="mx-3 hidden min-h-[100%] w-[1px] bg-[#bec4cd] md:block"></div>
+          <div className="my-3 block min-h-[1px] min-w-[100%] bg-[#bec4cd] md:hidden"></div>
           <div className="flex w-[350px] flex-col">
             <p className="mb-2 text-[20px] font-bold">FE</p>
             <div className="mb-5 flex flex-row">{portfolio.fe.join(', ')}</div>

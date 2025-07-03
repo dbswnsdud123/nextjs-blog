@@ -11,8 +11,8 @@ const siteMetadata = {
   siteLogo: `${process.env.BASE_PATH || ''}/static/images/logo.png`,
   email: 'dbswnsdud12336@gmail.com',
   github: 'https://github.com/dbswnsdud123',
-  linkedin: 'https://www.linkedin.com/in/yoon-junyoung-0000000000/',
-  instagram: 'https://www.instagram.com',
+  linkedin: 'https://www.linkedin.com/in/jun-young-yoon-82737b226/',
+  instagram: 'https://www.instagram.com/joon_pottery/',
   locale: 'en-US',
   // set to true if you want a navbar fixed to the top
   stickyNav: false,
