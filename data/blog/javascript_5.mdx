@@ -1,0 +1,644 @@
+---
+title: '자바스크립트 비동기 처리 패턴의 진화 - 콜백 지옥에서 async/await까지'
+date: '2024-12-28'
+lastmod: '2024-12-28'
+tags: ['javascript']
+draft: false
+summary: '자바스크립트 비동기 처리 패턴의 발전 과정을 살펴봅니다. 콜백 함수부터 Promise, async/await까지 각 패턴의 장단점과 실무에서 효과적으로 사용하는 방법을 코드 예제와 함께 깊이 있게 다룹니다.'
+images:
+  - '/static/images/javascript-internals.png'
+---
+
+5년 전에 자바스크립트로 Ajax 요청을 처리하던 코드를 보면 정말 끔찍하다. 중괄호가 끝없이 이어지는 콜백 지옥에 빠져서 디버깅하다가 눈물이 날 지경이었다. 그런데 지금은 `async/await` 덕분에 마치 동기 코드처럼 깔끔하게 작성할 수 있다.
+
+하지만 여전히 많은 개발자들이 "언제 Promise를 쓰고 언제 async/await를 써야 하나요?"라고 묻는다. 각 패턴이 왜 나타났고 어떤 문제를 해결하는지 알면 더 적절한 선택을 할 수 있다.
+
+<TOCInline toc={props.toc} exclude="" />
+
+## 동기와 비동기의 차이
+
+먼저 기본부터 짚고 넘어가자. 자바스크립트는 싱글 스레드지만 비동기 작업을 처리할 수 있다:
+
+```javascript
+// 동기 코드: 순서대로 실행
+console.log('첫 번째')
+console.log('두 번째')
+console.log('세 번째')
+// 출력: 첫 번째 → 두 번째 → 세 번째
+
+// 비동기 코드: 실행 순서가 다름
+console.log('첫 번째')
+setTimeout(() => console.log('두 번째'), 0)
+console.log('세 번째')
+// 출력: 첫 번째 → 세 번째 → 두 번째
+```
+
+네트워크 요청, 파일 읽기, 타이머 등은 시간이 걸리는 작업이다. 이런 작업들을 동기적으로 처리하면 브라우저가 멈춘다. 그래서 비동기 처리가 필요하다.
+
+## 1세대: 콜백 함수
+
+초기 자바스크립트에서는 콜백 함수로 비동기를 처리했다:
+
+```javascript
+// XMLHttpRequest를 사용한 Ajax
+function fetchUser(id, callback) {
+  const xhr = new XMLHttpRequest()
+  xhr.open('GET', `/api/users/${id}`)
+
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState === 4) {
+      if (xhr.status === 200) {
+        const user = JSON.parse(xhr.responseText)
+        callback(null, user)
+      } else {
+        callback(new Error('요청 실패'))
+      }
+    }
+  }
+
+  xhr.send()
+}
+
+// 사용법
+fetchUser(123, function (error, user) {
+  if (error) {
+    console.error(error)
+    return
+  }
+  console.log(user)
+})
+```
+
+콜백 패턴은 직관적이지만 문제가 많았다.
+
+### 콜백 지옥 (Callback Hell)
+
+연속된 비동기 작업을 처리할 때 코드가 지옥이 된다:
+
+```javascript
+// 사용자 정보 → 권한 정보 → 프로필 이미지 순서로 가져오기
+fetchUser(123, function (userError, user) {
+  if (userError) {
+    handleError(userError)
+    return
+  }
+
+  fetchPermissions(user.id, function (permError, permissions) {
+    if (permError) {
+      handleError(permError)
+      return
+    }
+
+    fetchProfileImage(user.profileId, function (imageError, image) {
+      if (imageError) {
+        handleError(imageError)
+        return
+      }
+
+      // 드디어 모든 데이터를 가져옴
+      displayUserProfile(user, permissions, image)
+    })
+  })
+})
+```
+
+이런 코드의 문제점:
+
+1. **가독성**: 중괄호가 계속 중첩되어 읽기 어려움
+2. **에러 처리**: 각 단계마다 에러 처리를 반복해야 함
+3. **디버깅**: 스택 트레이스 추적이 어려움
+4. **재사용성**: 로직을 다른 곳에서 재사용하기 힘듦
+
+### Node.js 스타일 콜백
+
+Node.js에서는 에러 우선 콜백 패턴을 표준화했다:
+
+```javascript
+// 첫 번째 인자는 항상 에러
+fs.readFile('config.json', function (err, data) {
+  if (err) {
+    console.error('파일 읽기 실패:', err)
+    return
+  }
+
+  const config = JSON.parse(data)
+  console.log(config)
+})
+```
+
+하지만 여전히 콜백 지옥 문제는 해결되지 않았다.
+
+## 2세대: Promise
+
+ES6에서 Promise가 도입되면서 상황이 개선됐다:
+
+```javascript
+function fetchUser(id) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('GET', `/api/users/${id}`)
+
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4) {
+        if (xhr.status === 200) {
+          const user = JSON.parse(xhr.responseText)
+          resolve(user)
+        } else {
+          reject(new Error('요청 실패'))
+        }
+      }
+    }
+
+    xhr.send()
+  })
+}
+
+// 사용법
+fetchUser(123)
+  .then((user) => console.log(user))
+  .catch((error) => console.error(error))
+```
+
+### Promise 체이닝
+
+Promise의 진가는 체이닝에서 나타난다:
+
+```javascript
+fetchUser(123)
+  .then((user) => fetchPermissions(user.id))
+  .then((permissions) => fetchProfileImage(permissions.profileId))
+  .then((image) => {
+    console.log('모든 데이터 로드 완료')
+    return { user, permissions, image }
+  })
+  .catch((error) => {
+    console.error('어딘가에서 에러 발생:', error)
+  })
+```
+
+콜백 지옥보다 훨씬 깔끔하다. 하지만 여전히 아쉬운 점들이 있었다:
+
+```javascript
+// 중간 결과를 유지하려면 클로저를 사용해야 함
+let userData
+fetchUser(123)
+  .then((user) => {
+    userData = user // 외부 변수에 저장
+    return fetchPermissions(user.id)
+  })
+  .then((permissions) => {
+    return fetchProfileImage(userData.profileId)
+  })
+  .then((image) => {
+    displayUserProfile(userData, permissions, image)
+  })
+```
+
+### Promise의 핵심 개념
+
+Promise는 세 가지 상태를 가진다:
+
+```javascript
+// pending: 대기 중
+const pendingPromise = new Promise((resolve, reject) => {
+  // 아직 resolve나 reject가 호출되지 않음
+})
+
+// fulfilled: 이행됨
+const fulfilledPromise = Promise.resolve('성공')
+
+// rejected: 거부됨
+const rejectedPromise = Promise.reject(new Error('실패'))
+```
+
+Promise는 한 번 상태가 바뀌면 다시 바뀌지 않는다:
+
+```javascript
+const promise = new Promise((resolve, reject) => {
+  resolve('첫 번째')
+  resolve('두 번째') // 무시됨
+  reject(new Error('에러')) // 무시됨
+})
+
+promise.then((value) => console.log(value)) // '첫 번째'
+```
+
+## 2.5세대: Promise 유틸리티들
+
+Promise와 함께 유용한 유틸리티들이 등장했다:
+
+### Promise.all
+
+여러 작업을 병렬로 실행:
+
+```javascript
+// 모든 요청이 완료될 때까지 기다림
+Promise.all([fetchUser(123), fetchUser(456), fetchUser(789)])
+  .then((users) => {
+    console.log('모든 사용자 데이터:', users)
+  })
+  .catch((error) => {
+    console.error('하나라도 실패하면 전체 실패:', error)
+  })
+```
+
+### Promise.allSettled
+
+실패한 것과 성공한 것을 모두 확인:
+
+```javascript
+Promise.allSettled([
+  fetchUser(123),
+  fetchUser(999), // 존재하지 않는 사용자
+  fetchUser(456),
+]).then((results) => {
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      console.log(`사용자 ${index}: ${result.value.name}`)
+    } else {
+      console.log(`사용자 ${index}: 로드 실패`)
+    }
+  })
+})
+```
+
+### Promise.race
+
+가장 먼저 완료되는 것만 취득:
+
+```javascript
+// 타임아웃 구현
+Promise.race([
+  fetchUser(123),
+  new Promise((_, reject) => setTimeout(() => reject(new Error('타임아웃')), 5000)),
+])
+  .then((user) => console.log(user))
+  .catch((error) => console.error(error))
+```
+
+## 3세대: async/await
+
+ES2017에서 도입된 async/await는 비동기 코드를 동기 코드처럼 작성할 수 있게 해준다:
+
+```javascript
+async function loadUserProfile(id) {
+  try {
+    const user = await fetchUser(id)
+    const permissions = await fetchPermissions(user.id)
+    const image = await fetchProfileImage(user.profileId)
+
+    return { user, permissions, image }
+  } catch (error) {
+    console.error('에러 발생:', error)
+    throw error
+  }
+}
+
+// 사용법
+loadUserProfile(123)
+  .then((profile) => displayUserProfile(profile))
+  .catch((error) => handleError(error))
+```
+
+### async/await의 장점
+
+1. **가독성**: 동기 코드와 거의 비슷함
+2. **에러 처리**: try/catch로 일관된 에러 처리
+3. **디버깅**: 스택 트레이스가 명확함
+4. **조건문**: 복잡한 조건부 로직 작성이 쉬움
+
+```javascript
+async function processUsers(userIds) {
+  const results = []
+
+  for (const id of userIds) {
+    try {
+      const user = await fetchUser(id)
+
+      // 조건부 로직이 자연스럽다
+      if (user.isActive) {
+        const permissions = await fetchPermissions(user.id)
+        if (permissions.includes('admin')) {
+          results.push(user)
+        }
+      }
+    } catch (error) {
+      console.log(`사용자 ${id} 처리 실패:`, error)
+    }
+  }
+
+  return results
+}
+```
+
+### 병렬 처리 주의사항
+
+async/await를 잘못 사용하면 성능 문제가 생긴다:
+
+```javascript
+// 잘못된 방법: 순차 실행 (느림)
+async function loadUsersSequential(ids) {
+  const users = []
+  for (const id of ids) {
+    const user = await fetchUser(id) // 하나씩 기다림
+    users.push(user)
+  }
+  return users
+}
+
+// 올바른 방법: 병렬 실행 (빠름)
+async function loadUsersParallel(ids) {
+  const promises = ids.map((id) => fetchUser(id))
+  const users = await Promise.all(promises)
+  return users
+}
+```
+
+## 실무에서의 패턴 활용
+
+### 에러 처리 전략
+
+```javascript
+// 1. 개별 에러 처리
+async function robustUserLoader(id) {
+  try {
+    const user = await fetchUser(id)
+    return user
+  } catch (error) {
+    // 사용자 로드 실패시 기본 사용자 반환
+    console.warn(`사용자 ${id} 로드 실패, 기본값 사용`)
+    return { id, name: 'Unknown User', isActive: false }
+  }
+}
+
+// 2. 전역 에러 처리
+async function loadUserProfile(id) {
+  const user = await fetchUser(id)
+  const permissions = await fetchPermissions(user.id)
+  // 에러가 발생하면 상위로 전파
+  return { user, permissions }
+}
+
+// 상위에서 일괄 처리
+loadUserProfile(123).catch((error) => {
+  showErrorMessage('프로필 로드 실패')
+  logError(error)
+})
+```
+
+### 재시도 로직
+
+```javascript
+async function fetchWithRetry(url, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url)
+      if (response.ok) {
+        return await response.json()
+      }
+      throw new Error(`HTTP ${response.status}`)
+    } catch (error) {
+      if (i === maxRetries - 1) {
+        throw error
+      }
+
+      // 지수 백오프
+      const delay = Math.pow(2, i) * 1000
+      console.log(`재시도 ${i + 1}/${maxRetries} (${delay}ms 후)`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+}
+```
+
+### 캐싱과 메모이제이션
+
+```javascript
+const userCache = new Map()
+
+async function getCachedUser(id) {
+  if (userCache.has(id)) {
+    console.log('캐시에서 반환')
+    return userCache.get(id)
+  }
+
+  console.log('서버에서 가져옴')
+  const user = await fetchUser(id)
+  userCache.set(id, user)
+
+  // 5분 후 캐시 무효화
+  setTimeout(() => userCache.delete(id), 5 * 60 * 1000)
+
+  return user
+}
+```
+
+### AbortController를 이용한 취소
+
+```javascript
+async function searchUsers(query, signal) {
+  try {
+    const response = await fetch(`/api/search?q=${query}`, {
+      signal, // AbortSignal 전달
+    })
+    return await response.json()
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      console.log('검색이 취소됨')
+      return []
+    }
+    throw error
+  }
+}
+
+// 사용법
+const controller = new AbortController()
+
+searchUsers('javascript', controller.signal).then((users) => console.log(users))
+
+// 3초 후 취소
+setTimeout(() => controller.abort(), 3000)
+```
+
+## 현대적 패턴들
+
+### Generator와 비동기
+
+```javascript
+function* userGenerator(userIds) {
+  for (const id of userIds) {
+    yield fetchUser(id)
+  }
+}
+
+// 순차적으로 사용자 로드
+async function processUsersSequentially(userIds) {
+  for (const userPromise of userGenerator(userIds)) {
+    const user = await userPromise
+    console.log(`처리 완료: ${user.name}`)
+  }
+}
+```
+
+### Async Iteration
+
+```javascript
+async function* asyncUserGenerator(userIds) {
+  for (const id of userIds) {
+    yield await fetchUser(id)
+  }
+}
+
+// for-await-of 구문 사용
+async function processUsers(userIds) {
+  for await (const user of asyncUserGenerator(userIds)) {
+    console.log(`처리 완료: ${user.name}`)
+  }
+}
+```
+
+### Top-level await
+
+ES2022부터는 모듈 최상위에서 await를 사용할 수 있다:
+
+```javascript
+// config.js
+const response = await fetch('/api/config')
+const config = await response.json()
+
+export default config
+
+// main.js
+import config from './config.js'
+console.log(config) // 이미 로드된 상태
+```
+
+## 성능 최적화 팁
+
+### 배치 처리
+
+```javascript
+// 개별 요청 (비효율적)
+async function getUsers(ids) {
+  const users = []
+  for (const id of ids) {
+    const user = await fetchUser(id)
+    users.push(user)
+  }
+  return users
+}
+
+// 배치 요청 (효율적)
+async function getUsersBatch(ids) {
+  const response = await fetch('/api/users/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  })
+  return await response.json()
+}
+```
+
+### 지연 로딩
+
+```javascript
+class UserManager {
+  constructor() {
+    this.usersPromise = null
+  }
+
+  // 처음 호출될 때만 로드
+  async getUsers() {
+    if (!this.usersPromise) {
+      this.usersPromise = this.loadUsers()
+    }
+    return this.usersPromise
+  }
+
+  async loadUsers() {
+    const response = await fetch('/api/users')
+    return await response.json()
+  }
+}
+```
+
+## 일반적인 실수들
+
+### 1. await를 빠뜨리는 경우
+
+```javascript
+// 잘못된 코드
+async function badExample() {
+  const user = fetchUser(123) // await 빠뜨림
+  console.log(user.name) // Promise 객체가 출력됨
+}
+
+// 올바른 코드
+async function goodExample() {
+  const user = await fetchUser(123)
+  console.log(user.name)
+}
+```
+
+### 2. Promise.all 잘못 사용
+
+```javascript
+// 잘못된 방법: 순차 실행
+async function badParallel(ids) {
+  const users = []
+  for (const id of ids) {
+    users.push(await fetchUser(id))
+  }
+  return users
+}
+
+// 올바른 방법: 병렬 실행
+async function goodParallel(ids) {
+  const promises = ids.map((id) => fetchUser(id))
+  return await Promise.all(promises)
+}
+```
+
+### 3. 에러 처리 누락
+
+```javascript
+// 위험한 코드: 에러가 상위로 전파됨
+async function riskyFunction() {
+  const data = await fetchData() // 에러 발생시 함수 중단
+  return processData(data)
+}
+
+// 안전한 코드: 에러 처리 포함
+async function safeFunction() {
+  try {
+    const data = await fetchData()
+    return processData(data)
+  } catch (error) {
+    console.error('데이터 처리 실패:', error)
+    return null
+  }
+}
+```
+
+비동기 처리 패턴의 진화를 보면 자바스크립트 생태계가 얼마나 빠르게 발전해왔는지 알 수 있다. 콜백 지옥에서 시작해서 Promise, 그리고 async/await까지 오면서 코드가 점점 더 읽기 쉽고 유지보수하기 좋아졌다.
+
+핵심 포인트들:
+
+- 콜백은 직관적이지만 중첩되면 지옥이 됨
+- Promise는 체이닝으로 가독성을 개선했지만 여전히 복잡함
+- async/await는 동기 코드처럼 작성할 수 있게 해줌
+- 병렬 처리와 에러 처리를 제대로 해야 성능과 안정성 확보
+- 상황에 맞는 패턴 선택이 중요
+
+이제 "콜백 지옥이 뭔가요?"라고 묻는 후배에게 역사적 맥락과 함께 각 패턴의 장단점을 설명해줄 수 있을 것이다. 도구는 발전했지만 비동기의 본질은 여전히 같다.
+
+## 참고 자료
+
+- [MDN - Asynchronous JavaScript](https://developer.mozilla.org/en-US/docs/Learn/JavaScript/Asynchronous)
+- [JavaScript Promises: An introduction](https://web.dev/promises/)
+- [Async functions - making promises friendly](https://web.dev/async-functions/)
+- [AbortController - Web APIs](https://developer.mozilla.org/en-US/docs/Web/API/AbortController)
+
+---
+
+_비동기 처리 패턴을 마스터하면 모던 웹 개발의 핵심을 이해한 것이다. 다음 글에서는 함수형 프로그래밍 개념과 실무 적용에 대해 다룰 예정이다._

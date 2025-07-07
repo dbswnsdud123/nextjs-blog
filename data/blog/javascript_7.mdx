@@ -1,0 +1,745 @@
+---
+title: '자바스크립트 성능 최적화 기법과 메모리 관리 - 왜 내 앱은 느려지고 메모리는 늘어만 갈까'
+date: '2025-01-02'
+lastmod: '2025-01-02'
+tags: ['javascript']
+draft: false
+summary: '자바스크립트 애플리케이션의 성능 병목 지점을 찾고 해결하는 방법을 다룹니다. 메모리 누수 방지, 렌더링 최적화, 코드 스플리팅 등 실무에서 바로 적용할 수 있는 성능 최적화 기법을 실제 사례와 함께 깊이 있게 알아봅니다.'
+images:
+  - '/static/images/javascript-internals.png'
+---
+
+처음 만든 웹 애플리케이션이 느려지기 시작했을 때의 당황스러움이 아직도 생생하다. 처음에는 잘 동작하던 게 사용자가 늘어나니까 점점 버벅거리기 시작했다. 개발자 도구를 열어보니 메모리 사용량이 계속 증가하고 있었다.
+
+"자바스크립트는 가비지 컬렉션이 자동으로 되는데 왜 메모리 누수가 생기지?" 하면서 구글링을 시작했다. 그때 깨달았다. 자동 메모리 관리가 만능이 아니라는 것을. 개발자가 신경 써야 할 것들이 생각보다 많다는 것을.
+
+<TOCInline toc={props.toc} exclude="" />
+
+## 성능 문제의 주요 원인들
+
+성능 문제는 보통 몇 가지 패턴으로 나타난다:
+
+### 1. 메모리 누수
+
+```javascript
+// 문제: 이벤트 리스너가 제거되지 않음
+function setupEventListener() {
+  const button = document.getElementById('myButton')
+  const heavyData = new Array(1000000).fill('data')
+
+  button.addEventListener('click', function () {
+    console.log('클릭됨')
+    // heavyData가 클로저로 인해 해제되지 않음
+  })
+}
+
+// 해결: 명시적 정리
+function setupEventListener() {
+  const button = document.getElementById('myButton')
+
+  function handleClick() {
+    console.log('클릭됨')
+  }
+
+  button.addEventListener('click', handleClick)
+
+  // 컴포넌트 언마운트 시
+  return () => button.removeEventListener('click', handleClick)
+}
+```
+
+### 2. 불필요한 재계산
+
+```javascript
+// 문제: 매번 같은 계산 반복
+function expensiveComponent() {
+  const data = getData()
+  const processedData = data.map((item) => {
+    // 복잡한 계산
+    return heavyProcessing(item)
+  })
+
+  return processedData
+}
+
+// 해결: 메모이제이션
+const memoizedProcess = useMemo(() => {
+  return data.map((item) => heavyProcessing(item))
+}, [data])
+```
+
+### 3. DOM 조작 과다
+
+```javascript
+// 문제: DOM을 여러 번 조작
+function updateList(items) {
+  const list = document.getElementById('list')
+  list.innerHTML = '' // 전체 초기화
+
+  items.forEach((item) => {
+    const li = document.createElement('li')
+    li.textContent = item.name
+    list.appendChild(li) // 매번 DOM 조작
+  })
+}
+
+// 해결: 한 번에 DOM 업데이트
+function updateList(items) {
+  const list = document.getElementById('list')
+  const fragment = document.createDocumentFragment()
+
+  items.forEach((item) => {
+    const li = document.createElement('li')
+    li.textContent = item.name
+    fragment.appendChild(li)
+  })
+
+  list.innerHTML = ''
+  list.appendChild(fragment) // 한 번만 DOM 조작
+}
+```
+
+## 메모리 관리 깊이 파기
+
+### 가비지 컬렉션 이해하기
+
+자바스크립트 엔진은 도달할 수 없는 객체를 자동으로 정리한다. 하지만 예상치 못한 참조로 인해 정리되지 않는 경우가 있다:
+
+```javascript
+// 순환 참조 문제
+function createNodes() {
+  const nodeA = { name: 'A' }
+  const nodeB = { name: 'B' }
+
+  nodeA.ref = nodeB
+  nodeB.ref = nodeA // 순환 참조
+
+  return { nodeA, nodeB }
+}
+
+// 최신 브라우저는 순환 참조를 처리하지만
+// DOM과 자바스크립트 객체 간 순환 참조는 여전히 위험
+function problematicDOMRef() {
+  const element = document.getElementById('myDiv')
+  const data = { element }
+
+  element.customData = data // DOM ↔ JS 순환 참조
+}
+```
+
+### 메모리 누수의 주범들
+
+#### 1. 전역 변수
+
+```javascript
+// 나쁜 예: 전역 변수 남발
+var cache = {} // 계속 누적됨
+var timers = [] // 정리되지 않음
+
+function processData(data) {
+  cache[data.id] = data // 메모리 계속 증가
+}
+
+// 좋은 예: 적절한 정리
+class DataProcessor {
+  constructor() {
+    this.cache = new Map()
+    this.maxCacheSize = 100
+  }
+
+  processData(data) {
+    if (this.cache.size >= this.maxCacheSize) {
+      const firstKey = this.cache.keys().next().value
+      this.cache.delete(firstKey)
+    }
+    this.cache.set(data.id, data)
+  }
+
+  cleanup() {
+    this.cache.clear()
+  }
+}
+```
+
+#### 2. 타이머와 인터벌
+
+```javascript
+// 문제: 타이머가 정리되지 않음
+function startPolling() {
+  const interval = setInterval(() => {
+    fetchLatestData()
+  }, 1000)
+
+  // interval이 전역적으로 계속 실행됨
+}
+
+// 해결: 적절한 정리
+class DataPoller {
+  constructor() {
+    this.intervalId = null
+  }
+
+  start() {
+    this.intervalId = setInterval(() => {
+      fetchLatestData()
+    }, 1000)
+  }
+
+  stop() {
+    if (this.intervalId) {
+      clearInterval(this.intervalId)
+      this.intervalId = null
+    }
+  }
+}
+```
+
+#### 3. 이벤트 리스너
+
+```javascript
+// React에서 흔한 실수
+function MyComponent() {
+  useEffect(() => {
+    function handleResize() {
+      console.log('화면 크기 변경')
+    }
+
+    window.addEventListener('resize', handleResize)
+
+    // 정리 함수 누락시 메모리 누수!
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  return <div>컴포넌트</div>
+}
+```
+
+#### 4. 클로저의 함정
+
+```javascript
+// 문제: 클로저가 큰 객체를 참조
+function createHandler(largeData) {
+  const processedData = largeData.map(heavy Processing)
+
+  return function(event) {
+    // 실제로는 event.target.value만 사용하지만
+    // 전체 largeData가 메모리에 유지됨
+    console.log(event.target.value)
+  }
+}
+
+// 해결: 필요한 데이터만 추출
+function createHandler(largeData) {
+  const summary = largeData.length // 필요한 정보만 추출
+
+  return function(event) {
+    console.log(event.target.value)
+    console.log(`총 ${summary}개 항목`)
+  }
+}
+```
+
+## 렌더링 성능 최적화
+
+### 레이아웃 스래싱 방지
+
+```javascript
+// 문제: 강제 동기 레이아웃
+function badAnimation() {
+  elements.forEach((el) => {
+    el.style.left = '100px' // 스타일 변경
+    const width = el.offsetWidth // 강제 레이아웃 계산
+    el.style.width = width + 10 + 'px'
+  })
+}
+
+// 해결: 읽기와 쓰기 분리
+function goodAnimation() {
+  // 먼저 모든 값 읽기
+  const measurements = elements.map((el) => ({
+    element: el,
+    width: el.offsetWidth,
+  }))
+
+  // 그 다음 모든 값 쓰기
+  measurements.forEach(({ element, width }) => {
+    element.style.left = '100px'
+    element.style.width = width + 10 + 'px'
+  })
+}
+```
+
+### Virtual DOM 최적화
+
+```javascript
+// React에서 비효율적인 렌더링
+function UserList({ users }) {
+  return (
+    <div>
+      {users.map((user) => (
+        <UserItem
+          key={user.id}
+          user={user}
+          onUpdate={() => updateUser(user.id)} // 매번 새로운 함수 생성
+        />
+      ))}
+    </div>
+  )
+}
+
+// 최적화된 버전
+function UserList({ users, onUpdateUser }) {
+  const handleUpdate = useCallback(
+    (userId) => {
+      onUpdateUser(userId)
+    },
+    [onUpdateUser]
+  )
+
+  return (
+    <div>
+      {users.map((user) => (
+        <UserItem key={user.id} user={user} onUpdate={handleUpdate} />
+      ))}
+    </div>
+  )
+}
+
+// UserItem도 메모이제이션
+const UserItem = memo(({ user, onUpdate }) => {
+  return <div onClick={() => onUpdate(user.id)}>{user.name}</div>
+})
+```
+
+### 무한 스크롤 최적화
+
+```javascript
+// 문제: 모든 아이템을 DOM에 렌더링
+function InfiniteList({ items }) {
+  return (
+    <div style={{ height: '400px', overflow: 'auto' }}>
+      {items.map((item) => (
+        <div key={item.id} style={{ height: '50px' }}>
+          {item.content}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// 해결: 가상화 사용
+function VirtualizedList({ items }) {
+  const [scrollTop, setScrollTop] = useState(0)
+  const containerHeight = 400
+  const itemHeight = 50
+  const visibleItems = Math.ceil(containerHeight / itemHeight)
+  const startIndex = Math.floor(scrollTop / itemHeight)
+  const endIndex = Math.min(startIndex + visibleItems, items.length)
+
+  const visibleItemsToRender = items.slice(startIndex, endIndex)
+
+  return (
+    <div
+      style={{ height: containerHeight, overflow: 'auto' }}
+      onScroll={(e) => setScrollTop(e.target.scrollTop)}
+    >
+      <div style={{ height: items.length * itemHeight, position: 'relative' }}>
+        {visibleItemsToRender.map((item, index) => (
+          <div
+            key={item.id}
+            style={{
+              position: 'absolute',
+              top: (startIndex + index) * itemHeight,
+              height: itemHeight,
+              width: '100%',
+            }}
+          >
+            {item.content}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+```
+
+## 네트워크 최적화
+
+### 코드 스플리팅
+
+```javascript
+// 기본: 모든 코드를 한 번에 로드
+import HeavyComponent from './HeavyComponent'
+import AnotherHeavyComponent from './AnotherHeavyComponent'
+
+function App() {
+  const [showHeavy, setShowHeavy] = useState(false)
+
+  return (
+    <div>
+      <button onClick={() => setShowHeavy(true)}>무거운 컴포넌트 보기</button>
+      {showHeavy && <HeavyComponent />}
+    </div>
+  )
+}
+
+// 최적화: 필요할 때만 로드
+const HeavyComponent = lazy(() => import('./HeavyComponent'))
+
+function App() {
+  const [showHeavy, setShowHeavy] = useState(false)
+
+  return (
+    <div>
+      <button onClick={() => setShowHeavy(true)}>무거운 컴포넌트 보기</button>
+      {showHeavy && (
+        <Suspense fallback={<div>로딩 중...</div>}>
+          <HeavyComponent />
+        </Suspense>
+      )}
+    </div>
+  )
+}
+```
+
+### 데이터 페칭 최적화
+
+```javascript
+// 문제: 중복 요청
+function UserProfile({ userId }) {
+  const [user, setUser] = useState(null)
+
+  useEffect(() => {
+    fetchUser(userId).then(setUser) // 매번 새로운 요청
+  }, [userId])
+
+  return <div>{user?.name}</div>
+}
+
+// 해결: SWR 패턴 사용
+const userCache = new Map()
+const userPromises = new Map()
+
+function fetchUserWithCache(userId) {
+  if (userCache.has(userId)) {
+    return Promise.resolve(userCache.get(userId))
+  }
+
+  if (userPromises.has(userId)) {
+    return userPromises.get(userId)
+  }
+
+  const promise = fetchUser(userId).then((user) => {
+    userCache.set(userId, user)
+    userPromises.delete(userId)
+    return user
+  })
+
+  userPromises.set(userId, promise)
+  return promise
+}
+```
+
+### 이미지 최적화
+
+```javascript
+// 지연 로딩과 WebP 지원
+function OptimizedImage({ src, alt, ...props }) {
+  const [isLoaded, setIsLoaded] = useState(false)
+  const [isInView, setIsInView] = useState(false)
+  const imgRef = useRef()
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsInView(true)
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    if (imgRef.current) {
+      observer.observe(imgRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [])
+
+  const webpSrc = src.replace(/\.(jpg|jpeg|png)$/, '.webp')
+
+  return (
+    <div ref={imgRef} {...props}>
+      {isInView && (
+        <picture>
+          <source srcSet={webpSrc} type="image/webp" />
+          <img
+            src={src}
+            alt={alt}
+            onLoad={() => setIsLoaded(true)}
+            style={{
+              opacity: isLoaded ? 1 : 0,
+              transition: 'opacity 0.3s',
+            }}
+          />
+        </picture>
+      )}
+    </div>
+  )
+}
+```
+
+## 실무 최적화 전략
+
+### 성능 측정 도구 활용
+
+```javascript
+// 성능 측정 헬퍼
+function measurePerformance(name, fn) {
+  const start = performance.now()
+  const result = fn()
+  const end = performance.now()
+
+  console.log(`${name}: ${end - start}ms`)
+  return result
+}
+
+// 메모리 사용량 측정
+function checkMemoryUsage() {
+  if (performance.memory) {
+    const memory = performance.memory
+    console.log({
+      used: Math.round(memory.usedJSHeapSize / 1024 / 1024) + 'MB',
+      total: Math.round(memory.totalJSHeapSize / 1024 / 1024) + 'MB',
+      limit: Math.round(memory.jsHeapSizeLimit / 1024 / 1024) + 'MB',
+    })
+  }
+}
+
+// 사용법
+const processedData = measurePerformance('데이터 처리', () => {
+  return heavyDataProcessing(data)
+})
+
+setInterval(checkMemoryUsage, 5000) // 5초마다 메모리 확인
+```
+
+### 디바운싱과 스로틀링
+
+```javascript
+// 디바운싱: 마지막 호출만 실행
+function debounce(func, delay) {
+  let timeoutId
+  return function (...args) {
+    clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => func.apply(this, args), delay)
+  }
+}
+
+// 스로틀링: 일정 간격으로만 실행
+function throttle(func, limit) {
+  let inThrottle
+  return function (...args) {
+    if (!inThrottle) {
+      func.apply(this, args)
+      inThrottle = true
+      setTimeout(() => (inThrottle = false), limit)
+    }
+  }
+}
+
+// 실사용 예시
+const debouncedSearch = debounce((query) => {
+  searchAPI(query)
+}, 300)
+
+const throttledScroll = throttle(() => {
+  updateScrollPosition()
+}, 100)
+
+searchInput.addEventListener('input', (e) => debouncedSearch(e.target.value))
+window.addEventListener('scroll', throttledScroll)
+```
+
+### 웹 워커 활용
+
+```javascript
+// 메인 스레드를 블로킹하는 작업
+function heavyCalculation(data) {
+  // CPU 집약적인 작업
+  return data.map((item) => {
+    let result = 0
+    for (let i = 0; i < 1000000; i++) {
+      result += Math.sqrt(item.value * i)
+    }
+    return result
+  })
+}
+
+// 웹 워커로 분리
+// worker.js
+self.onmessage = function (e) {
+  const data = e.data
+  const result = data.map((item) => {
+    let calculation = 0
+    for (let i = 0; i < 1000000; i++) {
+      calculation += Math.sqrt(item.value * i)
+    }
+    return calculation
+  })
+
+  self.postMessage(result)
+}
+
+// main.js
+function calculateInWorker(data) {
+  return new Promise((resolve) => {
+    const worker = new Worker('worker.js')
+    worker.postMessage(data)
+    worker.onmessage = (e) => {
+      resolve(e.data)
+      worker.terminate()
+    }
+  })
+}
+```
+
+## 메모리 프로파일링
+
+### Chrome DevTools 활용
+
+```javascript
+// 메모리 누수 의심 지점 표시
+function trackMemoryLeaks() {
+  const objects = []
+
+  function createObjects() {
+    for (let i = 0; i < 1000; i++) {
+      objects.push({
+        id: i,
+        data: new Array(1000).fill('leak'),
+        timestamp: Date.now(),
+      })
+    }
+  }
+
+  // 10초마다 객체 생성 (의도적인 누수)
+  setInterval(createObjects, 10000)
+
+  // DevTools에서 확인할 수 있도록 전역에 노출
+  window.trackingObjects = objects
+}
+```
+
+### 성능 모니터링
+
+```javascript
+// 실제 사용자 성능 측정
+class PerformanceMonitor {
+  constructor() {
+    this.metrics = []
+  }
+
+  startMeasure(name) {
+    performance.mark(`${name}-start`)
+  }
+
+  endMeasure(name) {
+    performance.mark(`${name}-end`)
+    performance.measure(name, `${name}-start`, `${name}-end`)
+
+    const measure = performance.getEntriesByName(name)[0]
+    this.metrics.push({
+      name,
+      duration: measure.duration,
+      timestamp: Date.now(),
+    })
+
+    // 느린 작업 감지
+    if (measure.duration > 100) {
+      console.warn(`느린 작업 감지: ${name} (${measure.duration}ms)`)
+    }
+  }
+
+  getReport() {
+    return this.metrics.reduce((report, metric) => {
+      if (!report[metric.name]) {
+        report[metric.name] = []
+      }
+      report[metric.name].push(metric.duration)
+      return report
+    }, {})
+  }
+}
+
+const monitor = new PerformanceMonitor()
+
+// 사용법
+monitor.startMeasure('api-call')
+await fetchData()
+monitor.endMeasure('api-call')
+```
+
+## 프로덕션 최적화 체크리스트
+
+### 번들 크기 최적화
+
+```javascript
+// Tree shaking 확인
+// 좋은 예: named import
+import { debounce } from 'lodash'
+
+// 나쁜 예: default import
+import _ from 'lodash'
+
+// 더 좋은 예: 개별 패키지
+import debounce from 'lodash.debounce'
+```
+
+### 캐싱 전략
+
+```javascript
+// Service Worker 캐싱
+self.addEventListener('fetch', (event) => {
+  if (event.request.destination === 'script') {
+    event.respondWith(
+      caches.open('js-cache').then((cache) => {
+        return cache.match(event.request).then((response) => {
+          if (response) {
+            return response
+          }
+
+          return fetch(event.request).then((fetchResponse) => {
+            cache.put(event.request, fetchResponse.clone())
+            return fetchResponse
+          })
+        })
+      })
+    )
+  }
+})
+```
+
+성능 최적화는 끝이 없는 여정이다. 중요한 건 사용자가 체감할 수 있는 개선에 집중하는 것이다. 모든 최적화를 다 적용하려다 보면 코드 복잡도만 증가하고 실제 효과는 미미할 수 있다.
+
+핵심 포인트들:
+
+- 메모리 누수의 주요 원인을 파악하고 예방하기
+- 렌더링 성능은 사용자 경험에 직접적 영향
+- 네트워크 최적화로 로딩 시간 단축
+- 측정 없는 최적화는 의미 없음
+- 프로덕션 환경에서의 모니터링이 중요
+
+이제 "왜 우리 앱이 느린가요?"라고 묻는 동료에게 체계적인 진단과 해결 방법을 제시할 수 있을 것이다. 성능 최적화는 기술이 아니라 사용자를 위한 배려다.
+
+## 참고 자료
+
+- [Web Performance Working Group](https://www.w3.org/webperf/)
+- [Chrome DevTools Performance](https://developers.google.com/web/tools/chrome-devtools/performance)
+- [Memory Management - MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Memory_Management)
+- [JavaScript Performance Optimization](https://developers.google.com/web/fundamentals/performance/optimizing-content-efficiency)
+
+---
+
+_성능 최적화의 핵심은 사용자 관점에서 생각하는 것이다. 다음 글에서는 자바스크립트 테스팅 전략과 디버깅 기법에 대해 다룰 예정이다._

@@ -1,0 +1,571 @@
+---
+title: '함수형 프로그래밍과 선언형 프로그래밍 - 왜 갑자기 모든 곳에서 map과 filter를 쓸까'
+date: '2024-12-30'
+lastmod: '2024-12-30'
+tags: ['javascript']
+draft: false
+summary: '자바스크립트에서 함수형 프로그래밍이 주목받는 이유와 실무에서의 활용법을 다룹니다. 명령형과 선언형의 차이점, 고차함수의 활용, 불변성과 순수함수의 개념을 실제 프로젝트 사례와 함께 깊이 있게 알아봅니다.'
+images:
+  - '/static/images/javascript-internals.png'
+---
+
+몇 년 전만 해도 for문과 if문으로 모든 걸 해결했다. 배열을 순회하려면 for문, 조건 처리하려면 if문. 간단하고 직관적이었다. 그런데 어느 순간부터 코드 리뷰에서 "이거 map으로 바꿔주세요", "reduce 쓰면 더 깔끔할 것 같은데요"라는 피드백이 쏟아지기 시작했다.
+
+처음에는 이해가 안 됐다. for문이 더 빠르고 읽기 쉬운데 왜 굳이? 하지만 함수형 프로그래밍을 제대로 이해하고 나니 코드가 정말 깔끔해졌다. 버그도 줄어들고 테스트하기도 쉬워졌다.
+
+<TOCInline toc={props.toc} exclude="" />
+
+## 명령형 vs 선언형, 뭐가 다른가
+
+가장 기본적인 차이부터 보자. 배열에서 짝수만 골라서 두 배로 만드는 작업을 해보겠다.
+
+### 명령형 방식
+
+```javascript
+const numbers = [1, 2, 3, 4, 5, 6]
+const result = []
+
+// "어떻게" 해야 하는지 단계별로 명시
+for (let i = 0; i < numbers.length; i++) {
+  if (numbers[i] % 2 === 0) {
+    result.push(numbers[i] * 2)
+  }
+}
+
+console.log(result) // [4, 8, 12]
+```
+
+### 선언형 방식
+
+```javascript
+const numbers = [1, 2, 3, 4, 5, 6]
+
+// "무엇을" 원하는지만 명시
+const result = numbers
+  .filter((n) => n % 2 === 0) // 짝수만 필터링
+  .map((n) => n * 2) // 각각을 두 배로
+
+console.log(result) // [4, 8, 12]
+```
+
+선언형 방식이 더 읽기 쉽다. "짝수를 필터링해서 두 배로 만든다"는 의도가 바로 드러난다. 명령형은 "어떻게"에 집중하고, 선언형은 "무엇을"에 집중한다.
+
+## 순수 함수의 힘
+
+함수형 프로그래밍의 핵심은 **순수 함수**다. 순수 함수는 두 가지 특징을 가진다:
+
+1. 같은 입력에 대해 항상 같은 출력
+2. 부작용(side effect)이 없음
+
+```javascript
+// 순수 함수: 예측 가능하고 테스트하기 쉬움
+function add(a, b) {
+  return a + b
+}
+
+// 비순수 함수: 외부 상태에 의존
+let tax = 0.1
+function calculatePrice(price) {
+  return price + price * tax // 외부 변수 의존
+}
+
+// 비순수 함수: 부작용 발생
+function addToCart(item) {
+  cart.push(item) // 외부 상태 변경
+  showNotification('상품이 추가되었습니다') // 부작용
+}
+```
+
+순수 함수로 바꿔보자:
+
+```javascript
+// 순수 함수로 개선
+function calculatePrice(price, taxRate) {
+  return price + price * taxRate
+}
+
+function addToCart(cart, item) {
+  return [...cart, item] // 새로운 배열 반환
+}
+
+// 부작용은 별도로 분리
+function handleAddToCart(currentCart, item) {
+  const newCart = addToCart(currentCart, item)
+  showNotification('상품이 추가되었습니다')
+  return newCart
+}
+```
+
+## 불변성의 중요성
+
+함수형 프로그래밍에서는 데이터를 변경하지 않는다. 대신 새로운 데이터를 만든다:
+
+```javascript
+// 나쁜 예: 원본 배열 변경
+function addUser(users, newUser) {
+  users.push(newUser) // 원본 배열 수정
+  return users
+}
+
+// 좋은 예: 새로운 배열 생성
+function addUser(users, newUser) {
+  return [...users, newUser] // 새로운 배열 반환
+}
+
+// 객체도 마찬가지
+function updateUser(user, updates) {
+  return {
+    ...user,
+    ...updates,
+    updatedAt: new Date(),
+  }
+}
+```
+
+불변성을 지키면 다음과 같은 장점이 있다:
+
+1. **예측 가능성**: 함수 호출 후에도 원본 데이터가 그대로
+2. **디버깅 용이**: 데이터 변경 지점을 추적하기 쉬움
+3. **동시성 안전**: 여러 스레드에서 안전하게 접근 가능
+4. **시간 여행**: 이전 상태로 되돌리기 쉬움
+
+```javascript
+// Redux의 예시
+function todosReducer(state = [], action) {
+  switch (action.type) {
+    case 'ADD_TODO':
+      return [...state, action.todo] // 새로운 상태 반환
+
+    case 'TOGGLE_TODO':
+      return state.map((todo) =>
+        todo.id === action.id ? { ...todo, completed: !todo.completed } : todo
+      )
+
+    default:
+      return state
+  }
+}
+```
+
+## 고차 함수 마스터하기
+
+고차 함수는 함수를 인자로 받거나 함수를 반환하는 함수다. 자바스크립트의 배열 메서드들이 대표적인 예다.
+
+### map: 변환의 달인
+
+```javascript
+const users = [
+  { name: '김개발', age: 28, role: 'developer' },
+  { name: '박디자인', age: 25, role: 'designer' },
+  { name: '이기획', age: 30, role: 'pm' },
+]
+
+// 이름만 추출
+const names = users.map((user) => user.name)
+// ['김개발', '박디자인', '이기획']
+
+// 나이를 한국 나이로 변환 (+ 1)
+const koreanAges = users.map((user) => ({
+  ...user,
+  koreanAge: user.age + 1,
+}))
+
+// 특정 형태로 변환
+const userCards = users.map(
+  (user) => `
+  <div class="user-card">
+    <h3>${user.name}</h3>
+    <p>${user.role}</p>
+  </div>
+`
+)
+```
+
+### filter: 선별의 고수
+
+```javascript
+// 개발자만 필터링
+const developers = users.filter((user) => user.role === 'developer')
+
+// 30세 미만 필터링
+const youngUsers = users.filter((user) => user.age < 30)
+
+// 여러 조건 조합
+const youngDevelopers = users
+  .filter((user) => user.age < 30)
+  .filter((user) => user.role === 'developer')
+
+// 또는 한 번에
+const youngDevelopers2 = users.filter((user) => user.age < 30 && user.role === 'developer')
+```
+
+### reduce: 최종 보스
+
+reduce는 가장 강력하지만 이해하기 어려운 메서드다:
+
+```javascript
+const numbers = [1, 2, 3, 4, 5]
+
+// 기본: 합계 구하기
+const sum = numbers.reduce((acc, num) => acc + num, 0)
+// 15
+
+// 객체로 그룹핑
+const usersByRole = users.reduce((acc, user) => {
+  if (!acc[user.role]) {
+    acc[user.role] = []
+  }
+  acc[user.role].push(user)
+  return acc
+}, {})
+
+// 더 함수형으로
+const usersByRole2 = users.reduce(
+  (acc, user) => ({
+    ...acc,
+    [user.role]: [...(acc[user.role] || []), user],
+  }),
+  {}
+)
+
+// 카운팅
+const roleCounts = users.reduce(
+  (acc, user) => ({
+    ...acc,
+    [user.role]: (acc[user.role] || 0) + 1,
+  }),
+  {}
+)
+// { developer: 1, designer: 1, pm: 1 }
+```
+
+### 체이닝의 마법
+
+여러 고차 함수를 연결해서 복잡한 로직을 간단하게:
+
+```javascript
+const products = [
+  { name: '노트북', price: 1200000, category: 'electronics', inStock: true },
+  { name: '마우스', price: 25000, category: 'electronics', inStock: false },
+  { name: '키보드', price: 150000, category: 'electronics', inStock: true },
+  { name: '의자', price: 300000, category: 'furniture', inStock: true },
+]
+
+// 재고 있는 전자제품의 평균 가격
+const avgElectronicsPrice = products
+  .filter((p) => p.category === 'electronics')
+  .filter((p) => p.inStock)
+  .map((p) => p.price)
+  .reduce((sum, price, _, arr) => sum + price / arr.length, 0)
+
+// 더 읽기 쉽게 분리
+const electronicsInStock = products
+  .filter((p) => p.category === 'electronics')
+  .filter((p) => p.inStock)
+
+const prices = electronicsInStock.map((p) => p.price)
+const avgPrice = prices.reduce((sum, price) => sum + price, 0) / prices.length
+```
+
+## 함수 컴포지션
+
+작은 함수들을 조합해서 복잡한 기능을 만드는 기법:
+
+```javascript
+// 기본 함수들
+const add = (a, b) => a + b
+const multiply = (a, b) => a * b
+const subtract = (a, b) => a - b
+
+// 함수 컴포지션 헬퍼
+const compose =
+  (...fns) =>
+  (value) =>
+    fns.reduceRight((acc, fn) => fn(acc), value)
+const pipe =
+  (...fns) =>
+  (value) =>
+    fns.reduce((acc, fn) => fn(acc), value)
+
+// 사용 예시
+const addTax = (price) => price * 1.1
+const addShipping = (price) => price + 5000
+const formatCurrency = (price) => `₩${price.toLocaleString()}`
+
+const calculateFinalPrice = pipe(addTax, addShipping, formatCurrency)
+
+console.log(calculateFinalPrice(100000)) // "₩115,000"
+```
+
+실용적인 예시:
+
+```javascript
+// 문자열 처리 파이프라인
+const slugify = pipe(
+  (str) => str.toLowerCase(),
+  (str) => str.replace(/[^a-z0-9]+/g, '-'),
+  (str) => str.replace(/^-|-$/g, '')
+)
+
+console.log(slugify('Hello World! 123')) // "hello-world-123"
+
+// 데이터 변환 파이프라인
+const processUsers = pipe(
+  (users) => users.filter((user) => user.isActive),
+  (users) => users.map((user) => ({ ...user, displayName: `${user.firstName} ${user.lastName}` })),
+  (users) => users.sort((a, b) => a.displayName.localeCompare(b.displayName))
+)
+```
+
+## 커링 (Currying)
+
+함수의 인자를 하나씩 받는 함수들의 체인으로 바꾸는 기법:
+
+```javascript
+// 일반적인 함수
+function multiply(a, b, c) {
+  return a * b * c
+}
+
+// 커링된 함수
+const curriedMultiply = (a) => (b) => (c) => a * b * c
+
+// 사용법
+const multiplyBy2 = curriedMultiply(2)
+const multiplyBy2And3 = multiplyBy2(3)
+const result = multiplyBy2And3(4) // 2 * 3 * 4 = 24
+
+// 실용적인 예시
+const filter = (predicate) => (array) => array.filter(predicate)
+const map = (fn) => (array) => array.map(fn)
+
+const filterAdults = filter((person) => person.age >= 18)
+const getNames = map((person) => person.name)
+
+const adultNames = pipe(filterAdults, getNames)
+
+const people = [
+  { name: '김철수', age: 17 },
+  { name: '박영희', age: 22 },
+  { name: '이민수', age: 19 },
+]
+
+console.log(adultNames(people)) // ['박영희', '이민수']
+```
+
+## 실무에서의 활용 패턴
+
+### 데이터 변환 파이프라인
+
+```javascript
+// API 응답 처리
+const processApiResponse = pipe(
+  (response) => response.data,
+  (data) => data.filter((item) => item.status === 'active'),
+  (data) =>
+    data.map((item) => ({
+      id: item.id,
+      title: item.title,
+      formattedDate: new Date(item.createdAt).toLocaleDateString(),
+      author: `${item.author.firstName} ${item.author.lastName}`,
+    })),
+  (data) => data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+)
+
+// 사용
+fetch('/api/posts')
+  .then((response) => response.json())
+  .then(processApiResponse)
+  .then((posts) => renderPosts(posts))
+```
+
+### 폼 유효성 검사
+
+```javascript
+// 검증 함수들
+const required = (value) => (value ? null : '필수 입력 항목입니다')
+const minLength = (min) => (value) =>
+  value.length >= min ? null : `최소 ${min}자 이상 입력해주세요`
+const email = (value) => (/\S+@\S+\.\S+/.test(value) ? null : '올바른 이메일 형식이 아닙니다')
+
+// 검증 컴포지션
+const validateField =
+  (...validators) =>
+  (value) =>
+    validators.reduce((error, validator) => error || validator(value), null)
+
+const validateEmail = validateField(required, email)
+const validatePassword = validateField(required, minLength(8))
+
+// 폼 전체 검증
+const validateForm = (formData) => ({
+  email: validateEmail(formData.email),
+  password: validatePassword(formData.password),
+})
+```
+
+### 상태 관리
+
+```javascript
+// 함수형 상태 업데이트
+const updateTodo = (todos, id, updates) =>
+  todos.map((todo) => (todo.id === id ? { ...todo, ...updates } : todo))
+
+const addTodo = (todos, newTodo) => [...todos, newTodo]
+
+const removeTodo = (todos, id) => todos.filter((todo) => todo.id !== id)
+
+const toggleTodo = (todos, id) =>
+  updateTodo(todos, id, { completed: !findTodoById(todos, id).completed })
+
+// 헬퍼 함수
+const findTodoById = (todos, id) => todos.find((todo) => todo.id === id)
+```
+
+## 성능 고려사항
+
+함수형 프로그래밍이 항상 빠른 건 아니다:
+
+```javascript
+// 비효율적: 여러 번 순회
+const result = data
+  .filter((item) => item.active)
+  .map((item) => item.value)
+  .filter((value) => value > 0)
+  .map((value) => value * 2)
+
+// 효율적: 한 번만 순회
+const result2 = data.reduce((acc, item) => {
+  if (item.active && item.value > 0) {
+    acc.push(item.value * 2)
+  }
+  return acc
+}, [])
+
+// 절충안: 의미를 유지하면서 최적화
+const processItem = (item) => (item.active && item.value > 0 ? item.value * 2 : null)
+const result3 = data.map(processItem).filter((value) => value !== null)
+```
+
+### 메모이제이션 활용
+
+```javascript
+// 비싼 계산을 캐시
+const memoize = (fn) => {
+  const cache = new Map()
+  return (...args) => {
+    const key = JSON.stringify(args)
+    if (cache.has(key)) {
+      return cache.get(key)
+    }
+    const result = fn(...args)
+    cache.set(key, result)
+    return result
+  }
+}
+
+const expensiveCalculation = memoize((n) => {
+  console.log('계산 중...')
+  return n * n * n
+})
+
+console.log(expensiveCalculation(5)) // "계산 중..." 출력 후 125
+console.log(expensiveCalculation(5)) // 캐시에서 바로 125 반환
+```
+
+## 함정과 주의사항
+
+### 과도한 추상화
+
+```javascript
+// 과도한 함수형: 읽기 어려움
+const processUsers = pipe(
+  filter((user) => user.isActive),
+  map(addDisplayName),
+  sortBy(prop('displayName')),
+  groupBy(prop('department')),
+  mapValues(countBy(prop('role')))
+)
+
+// 적절한 수준: 의도가 명확함
+const getActiveUsers = (users) => users.filter((user) => user.isActive)
+const addDisplayNames = (users) => users.map(addDisplayName)
+const sortByName = (users) => users.sort((a, b) => a.displayName.localeCompare(b.displayName))
+
+const processUsers2 = pipe(getActiveUsers, addDisplayNames, sortByName)
+```
+
+### 불필요한 불변성
+
+```javascript
+// 과도한 불변성: 성능 문제
+const updateNestedState = (state, path, value) => ({
+  ...state,
+  user: {
+    ...state.user,
+    profile: {
+      ...state.user.profile,
+      [path]: value,
+    },
+  },
+})
+
+// 실용적 접근: Immer 같은 라이브러리 사용
+import produce from 'immer'
+
+const updateNestedState2 = (state, path, value) =>
+  produce(state, (draft) => {
+    draft.user.profile[path] = value
+  })
+```
+
+## 라이브러리 활용
+
+### Lodash/FP
+
+```javascript
+import { pipe, filter, map, sortBy, groupBy } from 'lodash/fp'
+
+const processData = pipe(
+  filter({ active: true }),
+  map('name'),
+  sortBy((name) => name.toLowerCase()),
+  groupBy((name) => name[0])
+)
+```
+
+### Ramda
+
+```javascript
+import { pipe, filter, map, sort, groupBy, prop } from 'ramda'
+
+const processUsers = pipe(
+  filter(prop('isActive')),
+  map((user) => ({ ...user, displayName: `${user.first} ${user.last}` })),
+  sort((a, b) => a.displayName.localeCompare(b.displayName)),
+  groupBy(prop('department'))
+)
+```
+
+함수형 프로그래밍은 은총알이 아니다. 하지만 적절히 사용하면 코드가 더 예측 가능하고 테스트하기 쉬워진다. 중요한 건 교조적으로 따르는 게 아니라 상황에 맞게 적용하는 것이다.
+
+핵심 포인트들:
+
+- 순수 함수와 불변성으로 예측 가능한 코드 작성
+- 고차 함수로 재사용 가능한 로직 구성
+- 함수 컴포지션으로 복잡한 기능을 작은 단위로 분해
+- 성능과 가독성 사이의 균형점 찾기
+- 과도한 추상화보다는 명확한 의도 전달이 우선
+
+이제 "왜 for문 대신 map을 써야 하나요?"라고 묻는 동료에게 단순히 "더 함수형이니까"가 아니라 구체적인 장점과 상황을 설명해줄 수 있을 것이다. 도구는 목적을 위한 수단일 뿐이다.
+
+## 참고 자료
+
+- [Functional Programming in JavaScript](https://github.com/MostlyAdequate/mostly-adequate-guide)
+- [Professor Frisby's Mostly Adequate Guide](https://mostly-adequate.gitbooks.io/mostly-adequate-guide/)
+- [Ramda Documentation](https://ramdajs.com/docs/)
+- [Lodash FP Guide](https://github.com/lodash/lodash/wiki/FP-Guide)
+
+---
+
+_함수형 프로그래밍의 핵심은 사고방식의 변화다. 다음 글에서는 자바스크립트 성능 최적화 기법과 메모리 관리에 대해 다룰 예정이다._

@@ -1,0 +1,523 @@
+---
+title: '자바스크립트 모듈 시스템과 번들링 - 왜 이렇게 복잡해졌을까'
+date: '2024-12-25'
+lastmod: '2024-12-25'
+tags: ['javascript']
+draft: false
+summary: '자바스크립트 모듈 시스템의 진화 과정과 현재 상황을 정리합니다. CommonJS, AMD, ES Modules의 차이점과 웹팩, 롤업, Vite 같은 번들러가 필요한 이유를 실무 관점에서 깊이 있게 다룹니다.'
+images:
+  - '/static/images/javascript-internals.png'
+---
+
+옛날 자바스크립트는 정말 단순했다. HTML에 `<script>` 태그 몇 개 넣고 전역 변수로 데이터 주고받으면 끝이었다. 그런데 언제부터인가 import, export, require, webpack, rollup, vite... 온갖 용어들이 난무하기 시작했다.
+
+왜 이렇게 복잡해진 걸까? 단순히 라이브러리 하나 가져다 쓰는 것도 설정 파일이 몇십 줄은 되어야 한다. 신입 개발자들이 "Hello World" 찍기 전에 포기하는 이유 중 하나가 바로 이 복잡한 모듈 시스템 때문이다.
+
+<TOCInline toc={props.toc} exclude="" />
+
+## 모듈이 왜 필요해졌을까
+
+처음에는 자바스크립트가 간단했다. 몇 줄짜리 스크립트로 폼 검증이나 간단한 인터랙션만 처리하면 됐으니까:
+
+```html
+<script>
+  var userName = 'guest'
+
+  function showWelcome() {
+    alert('환영합니다, ' + userName + '님!')
+  }
+</script>
+
+<script>
+  function login() {
+    userName = '김개발' // 전역 변수 수정
+    showWelcome()
+  }
+</script>
+```
+
+이런 식으로 전역 변수와 함수를 마구 사용해도 문제없었다. 코드가 몇백 줄 안 됐으니까.
+
+하지만 웹 애플리케이션이 복잡해지면서 문제가 생겼다:
+
+1. **전역 네임스페이스 오염**: 모든 변수와 함수가 전역에 노출
+2. **의존성 관리**: 어떤 스크립트가 먼저 로드되어야 하는지 파악 어려움
+3. **코드 재사용**: 다른 프로젝트에서 특정 기능만 가져오기 힘듦
+4. **캡슐화 부족**: 내부 구현을 숨길 방법이 없음
+
+## 초기 해결책들
+
+### IIFE (즉시 실행 함수 표현식)
+
+가장 먼저 나온 해결책은 IIFE였다:
+
+```javascript
+;(function () {
+  var privateVar = '외부에서 접근 불가'
+
+  function privateFunction() {
+    return privateVar
+  }
+
+  // 전역에 노출할 것만 선택
+  window.MyModule = {
+    publicMethod: function () {
+      return privateFunction()
+    },
+  }
+})()
+```
+
+이렇게 하면 모듈 내부 변수들이 전역을 오염시키지 않는다. 하지만 여전히 의존성 관리는 수동이었다.
+
+### 네임스페이스 패턴
+
+조금 더 체계적으로 관리하려고 네임스페이스 패턴을 사용했다:
+
+```javascript
+var MyApp = MyApp || {}
+
+MyApp.Utils = {
+  formatDate: function (date) {
+    // 날짜 포맷 로직
+  },
+}
+
+MyApp.UserModule = {
+  login: function () {
+    // 로그인 로직
+  },
+}
+```
+
+하지만 이것도 근본적인 해결책은 아니었다.
+
+## CommonJS의 등장
+
+Node.js가 나오면서 서버사이드 자바스크립트에 모듈 시스템이 필요해졌다. 그래서 나온 게 CommonJS다:
+
+```javascript
+// math.js
+function add(a, b) {
+  return a + b
+}
+
+function subtract(a, b) {
+  return a - b
+}
+
+module.exports = {
+  add: add,
+  subtract: subtract,
+}
+
+// main.js
+const math = require('./math')
+
+console.log(math.add(5, 3)) // 8
+console.log(math.subtract(5, 3)) // 2
+```
+
+CommonJS의 특징:
+
+- **동기적 로딩**: `require`가 호출되는 순간 파일을 읽어옴
+- **런타임 로딩**: 코드 실행 중에 모듈을 불러올 수 있음
+- **캐싱**: 한 번 로드된 모듈은 캐시됨
+- **Node.js 전용**: 브라우저에서는 직접 사용 불가
+
+```javascript
+// 조건부 로딩도 가능
+if (process.env.NODE_ENV === 'development') {
+  const devTools = require('./dev-tools')
+  devTools.init()
+}
+```
+
+## AMD (Asynchronous Module Definition)
+
+브라우저에서는 동기적 모듈 로딩이 문제였다. 네트워크를 통해 파일을 가져오는데 동기적으로 처리하면 UI가 멈춘다. 그래서 AMD가 나왔다:
+
+```javascript
+// math.js
+define(function () {
+  return {
+    add: function (a, b) {
+      return a + b
+    },
+    subtract: function (a, b) {
+      return a - b
+    },
+  }
+})
+
+// main.js
+require(['math'], function (math) {
+  console.log(math.add(5, 3))
+})
+```
+
+AMD의 특징:
+
+- **비동기적 로딩**: 모듈을 백그라운드에서 로드
+- **의존성 명시**: 필요한 모듈을 미리 선언
+- **브라우저 친화적**: RequireJS 같은 로더와 함께 사용
+
+하지만 문법이 복잡하고 콜백 지옥에 빠지기 쉬웠다.
+
+## ES Modules (ES6+)
+
+드디어 자바스크립트 표준에 모듈 시스템이 추가됐다:
+
+```javascript
+// math.js
+export function add(a, b) {
+  return a + b
+}
+
+export function subtract(a, b) {
+  return a - b
+}
+
+// 또는 default export
+export default function multiply(a, b) {
+  return a * b
+}
+
+// main.js
+import { add, subtract } from './math.js'
+import multiply from './math.js'
+
+console.log(add(5, 3)) // 8
+console.log(multiply(5, 3)) // 15
+```
+
+ES Modules의 특징:
+
+- **정적 분석**: 빌드 타임에 의존성 분석 가능
+- **Tree shaking**: 사용하지 않는 코드 제거 가능
+- **최상위 await**: 모듈 최상위에서 await 사용 가능
+- **표준**: ECMAScript 표준이므로 브라우저에서 네이티브 지원
+
+```javascript
+// 동적 import도 지원
+const module = await import('./heavy-module.js')
+```
+
+## 모듈 시스템 비교
+
+실무에서는 여러 모듈 시스템이 섞여서 사용되는 경우가 많다:
+
+```javascript
+// CommonJS (Node.js)
+const fs = require('fs')
+const path = require('path')
+
+// ES Modules (모던 브라우저)
+import React from 'react'
+import { useState } from 'react'
+
+// 동적 import
+const LazyComponent = lazy(() => import('./LazyComponent'))
+```
+
+### 상호 운용성 문제
+
+```javascript
+// ES Module에서 CommonJS 사용
+import express from 'express' // 가능 (default import)
+import { Router } from 'express' // 불가능 (named import)
+
+// 해결책: 전체 import 후 destructuring
+import express from 'express'
+const { Router } = express
+```
+
+## 번들러가 필요한 이유
+
+모듈 시스템이 있어도 브라우저에서 바로 사용하기는 어렵다:
+
+1. **호환성**: 모든 브라우저가 ES Modules를 지원하지 않음
+2. **성능**: 모듈마다 별도 HTTP 요청이 발생
+3. **최적화**: 코드 압축, Tree shaking 등이 필요
+4. **변환**: TypeScript, JSX 등을 일반 JS로 변환
+
+```javascript
+// 개발할 때는 이렇게 작성
+import { debounce } from 'lodash-es'
+import { Component } from 'react'
+import './styles.css'
+
+// 번들러가 이런 식으로 변환
+const debounce = __webpack_require__('lodash-es').debounce
+const Component = __webpack_require__('react').Component
+// CSS는 JS에 인라인으로 삽입되거나 별도 파일로 추출
+```
+
+## 주요 번들러들의 특징
+
+### Webpack
+
+가장 대중적인 번들러. 모든 것을 모듈로 취급한다:
+
+```javascript
+// webpack.config.js
+module.exports = {
+  entry: './src/index.js',
+  output: {
+    path: path.resolve(__dirname, 'dist'),
+    filename: 'bundle.js',
+  },
+  module: {
+    rules: [
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader'],
+      },
+      {
+        test: /\.(png|jpg|gif)$/,
+        use: ['file-loader'],
+      },
+    ],
+  },
+}
+```
+
+장점:
+
+- 강력한 플러그인 생태계
+- 모든 종류의 assets 처리 가능
+- 코드 스플리팅, HMR 등 고급 기능
+
+단점:
+
+- 설정이 복잡함
+- 빌드 속도가 느림 (특히 대형 프로젝트)
+
+### Rollup
+
+라이브러리 제작에 특화된 번들러:
+
+```javascript
+// rollup.config.js
+export default {
+  input: 'src/main.js',
+  output: {
+    file: 'dist/bundle.js',
+    format: 'esm',
+  },
+  plugins: [resolve(), commonjs(), terser()],
+}
+```
+
+장점:
+
+- Tree shaking이 뛰어남
+- 깔끔한 번들 결과물
+- ES Modules 네이티브 지원
+
+단점:
+
+- 애플리케이션보다는 라이브러리에 적합
+- 개발 서버 기능이 약함
+
+### Vite
+
+현재 가장 핫한 빌드 도구:
+
+```javascript
+// vite.config.js
+export default {
+  plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+        },
+      },
+    },
+  },
+}
+```
+
+장점:
+
+- 개발 서버가 매우 빠름 (ESM + esbuild)
+- 설정이 간단함
+- HMR이 빠름
+
+단점:
+
+- 상대적으로 새로워서 생태계가 작음
+- 일부 레거시 라이브러리와 호환성 이슈
+
+## 실무에서의 선택 기준
+
+### 프로젝트 성격에 따른 선택
+
+```javascript
+// 라이브러리 개발
+// rollup.config.js
+export default [
+  // UMD 빌드 (브라우저용)
+  {
+    input: 'src/index.js',
+    output: {
+      file: 'dist/my-lib.umd.js',
+      format: 'umd',
+      name: 'MyLib',
+    },
+  },
+  // ES Module 빌드 (번들러용)
+  {
+    input: 'src/index.js',
+    output: {
+      file: 'dist/my-lib.esm.js',
+      format: 'esm',
+    },
+  },
+]
+```
+
+```javascript
+// 레거시 프로젝트 (webpack)
+// babel.config.js
+module.exports = {
+  presets: ['@babel/preset-env'],
+  plugins: ['@babel/plugin-proposal-class-properties', '@babel/plugin-transform-runtime'],
+}
+```
+
+```javascript
+// 모던 프로젝트 (Vite)
+// 별도 설정 거의 불필요
+import { defineConfig } from 'vite'
+export default defineConfig({
+  // 필요시에만 설정 추가
+})
+```
+
+## 성능 최적화 전략
+
+### 코드 스플리팅
+
+```javascript
+// React에서 lazy loading
+const LazyComponent = lazy(() => import('./HeavyComponent'))
+
+function App() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <LazyComponent />
+    </Suspense>
+  )
+}
+```
+
+### Tree Shaking 최적화
+
+```javascript
+// 잘못된 방법: 전체 라이브러리 import
+import _ from 'lodash'
+const result = _.debounce(fn, 300)
+
+// 올바른 방법: 필요한 함수만 import
+import debounce from 'lodash/debounce'
+const result = debounce(fn, 300)
+```
+
+### 번들 크기 분석
+
+```bash
+# webpack-bundle-analyzer
+npm install --save-dev webpack-bundle-analyzer
+
+# rollup-plugin-analyzer
+npm install --save-dev rollup-plugin-analyzer
+```
+
+## 현재 권장 사항
+
+### 2024년 기준 선택 가이드
+
+**새 프로젝트라면:**
+
+- Vite + ES Modules
+- TypeScript 사용 권장
+- 필요시에만 설정 추가
+
+```javascript
+// package.json
+{
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}
+```
+
+**레거시 프로젝트라면:**
+
+- 점진적 마이그레이션
+- webpack → Vite 이주 고려
+- CommonJS → ES Modules 전환
+
+**라이브러리 개발이라면:**
+
+- Rollup 사용
+- 다양한 포맷으로 빌드
+- Tree shaking 친화적으로 작성
+
+## 미래 전망
+
+### Native ES Modules
+
+브라우저의 ES Modules 지원이 개선되고 있다:
+
+```html
+<!-- HTTP/2 + ES Modules -->
+<script type="module">
+  import { utils } from './utils.js'
+  // 번들링 없이도 성능 괜찮음
+</script>
+```
+
+### Import Maps
+
+의존성 관리가 더 쉬워질 예정:
+
+```html
+<script type="importmap">
+  {
+    "imports": {
+      "react": "/node_modules/react/index.js",
+      "lodash": "/node_modules/lodash/index.js"
+    }
+  }
+</script>
+```
+
+자바스크립트 모듈 시스템은 복잡해 보이지만, 각각 나름의 이유가 있어서 발전해온 것이다. 처음에는 전역 변수로 시작했지만, 웹 애플리케이션이 복잡해지면서 더 체계적인 관리가 필요해졌다.
+
+핵심 포인트들:
+
+- CommonJS는 Node.js에서, ES Modules는 브라우저에서 표준
+- 번들러는 브라우저 호환성과 성능 최적화를 위해 필요
+- 프로젝트 성격에 따라 적절한 도구 선택이 중요
+- 설정보다는 관례를 따르는 도구들이 인기
+- 미래에는 Native ES Modules로 단순해질 가능성
+
+이제 "왜 이렇게 복잡한가요?"라고 묻는 신입 개발자에게 역사적 맥락과 함께 설명해줄 수 있을 것이다. 도구는 복잡해 보이지만 결국 개발자의 생산성을 높이기 위한 것이니까.
+
+## 참고 자료
+
+- [ES Modules: A cartoon deep-dive](https://hacks.mozilla.org/2018/03/es-modules-a-cartoon-deep-dive/)
+- [Webpack Documentation](https://webpack.js.org/concepts/)
+- [Vite Guide](https://vitejs.dev/guide/)
+- [Node.js Modules Documentation](https://nodejs.org/api/modules.html)
+
+---
+
+_모듈 시스템을 이해하면 자바스크립트 생태계의 발전 과정이 보인다. 다음 글에서는 비동기 처리 패턴의 진화에 대해 다룰 예정이다._
