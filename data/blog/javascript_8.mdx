@@ -1,0 +1,614 @@
+---
+title: '자바스크립트 테스팅 전략과 디버깅 기법 - 실무에서 쓰이는 효과적인 방법들'
+date: '2025-01-03'
+lastmod: '2025-01-03'
+tags: ['javascript']
+draft: false
+summary: '실무에서 바로 적용할 수 있는 자바스크립트 테스팅 전략과 디버깅 기법을 다룹니다. 단위 테스트부터 통합 테스트까지의 실전 노하우와 브라우저 개발자 도구를 활용한 효율적인 디버깅 방법을 소개합니다.'
+images: ['/static/images/javascript-testing-debugging.png']
+---
+
+"버그가 없는 코드는 존재하지 않는다." 이 말이 맞다면, 우리가 해야 할 일은 버그를 피하는 것이 아니라 버그를 빠르게 찾고 고치는 것이다. 그리고 애초에 버그가 발생할 가능성을 줄이는 것이다.
+
+하지만 현실은 어떤가? 급하게 기능을 구현하느라 테스트는 뒷전이고, 문제가 생기면 `console.log`를 남발하며 시간을 낭비한다. 이런 식으로는 코드의 품질도, 개발 속도도 보장할 수 없다.
+
+이 글에서는 **실무에서 바로 써먹을 수 있는** 테스팅 전략과 디버깅 기법을 알아보자. 이론적인 이야기가 아니라, 진짜 현업에서 쓰이는 방법들이다.
+
+<TOCInline toc={props.toc} exclude="" />
+
+## 테스팅이 왜 필요한가?
+
+테스팅은 단순히 버그를 찾는 것이 아니다. 좋은 테스트는 다음과 같은 가치를 제공한다:
+
+1. **안정성**: 코드 변경 시 기존 기능이 깨지지 않음을 보장
+2. **문서화**: 코드가 어떻게 작동해야 하는지 명세서 역할
+3. **리팩토링 안전성**: 구조 변경 시 기능이 유지됨을 확인
+4. **개발 속도**: 수동 테스트 시간을 줄여 개발 생산성 향상
+
+```javascript
+// 테스트 없이 개발할 때
+function calculateTotal(items) {
+  let total = 0
+  for (let item of items) {
+    total += item.price * item.quantity
+  }
+  return total
+}
+
+// 매번 브라우저에서 직접 테스트해야 함
+// 예외 상황을 놓치기 쉬움
+// 코드 변경 시 전체 기능을 다시 확인해야 함
+```
+
+## 테스트 피라미드와 전략
+
+### 1. 단위 테스트 (Unit Test)
+
+가장 기본이 되는 테스트다. 함수나 클래스 하나하나를 독립적으로 테스트한다.
+
+```javascript
+// utils/calculator.js
+export function add(a, b) {
+  if (typeof a !== 'number' || typeof b !== 'number') {
+    throw new Error('숫자만 입력 가능합니다')
+  }
+  return a + b
+}
+
+export function calculateDiscount(price, discountRate) {
+  if (price < 0 || discountRate < 0 || discountRate > 1) {
+    throw new Error('유효하지 않은 값입니다')
+  }
+  return price * (1 - discountRate)
+}
+```
+
+```javascript
+// utils/calculator.test.js
+import { add, calculateDiscount } from './calculator.js'
+
+describe('Calculator 함수들', () => {
+  describe('add 함수', () => {
+    test('두 숫자를 더한다', () => {
+      expect(add(2, 3)).toBe(5)
+      expect(add(-1, 1)).toBe(0)
+    })
+
+    test('숫자가 아닌 값을 입력하면 에러가 발생한다', () => {
+      expect(() => add('2', 3)).toThrow('숫자만 입력 가능합니다')
+      expect(() => add(2, null)).toThrow('숫자만 입력 가능합니다')
+    })
+  })
+
+  describe('calculateDiscount 함수', () => {
+    test('할인율을 적용한 가격을 계산한다', () => {
+      expect(calculateDiscount(1000, 0.1)).toBe(900)
+      expect(calculateDiscount(1000, 0.5)).toBe(500)
+    })
+
+    test('경계값을 올바르게 처리한다', () => {
+      expect(calculateDiscount(1000, 0)).toBe(1000)
+      expect(calculateDiscount(0, 0.1)).toBe(0)
+    })
+
+    test('유효하지 않은 값에 대해 에러를 발생시킨다', () => {
+      expect(() => calculateDiscount(-100, 0.1)).toThrow()
+      expect(() => calculateDiscount(1000, 1.5)).toThrow()
+    })
+  })
+})
+```
+
+### 2. 통합 테스트 (Integration Test)
+
+여러 모듈이 함께 작동할 때의 동작을 테스트한다.
+
+```javascript
+// services/orderService.js
+import { calculateDiscount } from '../utils/calculator.js'
+
+export class OrderService {
+  constructor(userService, productService) {
+    this.userService = userService
+    this.productService = productService
+  }
+
+  async calculateOrderTotal(userId, items) {
+    const user = await this.userService.getUser(userId)
+    let total = 0
+
+    for (const item of items) {
+      const product = await this.productService.getProduct(item.productId)
+      const itemTotal = product.price * item.quantity
+
+      // VIP 사용자는 10% 할인
+      if (user.isVIP) {
+        total += calculateDiscount(itemTotal, 0.1)
+      } else {
+        total += itemTotal
+      }
+    }
+
+    return Math.round(total)
+  }
+}
+```
+
+```javascript
+// services/orderService.test.js
+import { OrderService } from './orderService.js'
+
+describe('OrderService 통합 테스트', () => {
+  let orderService
+  let mockUserService
+  let mockProductService
+
+  beforeEach(() => {
+    mockUserService = {
+      getUser: jest.fn(),
+    }
+    mockProductService = {
+      getProduct: jest.fn(),
+    }
+    orderService = new OrderService(mockUserService, mockProductService)
+  })
+
+  test('일반 사용자 주문 총액을 계산한다', async () => {
+    mockUserService.getUser.mockResolvedValue({ isVIP: false })
+    mockProductService.getProduct.mockResolvedValue({ price: 1000 })
+
+    const total = await orderService.calculateOrderTotal('user1', [
+      { productId: 'product1', quantity: 2 },
+    ])
+
+    expect(total).toBe(2000)
+  })
+
+  test('VIP 사용자는 10% 할인이 적용된다', async () => {
+    mockUserService.getUser.mockResolvedValue({ isVIP: true })
+    mockProductService.getProduct.mockResolvedValue({ price: 1000 })
+
+    const total = await orderService.calculateOrderTotal('vip1', [
+      { productId: 'product1', quantity: 2 },
+    ])
+
+    expect(total).toBe(1800) // 2000 * 0.9
+  })
+})
+```
+
+### 3. E2E 테스트 (End-to-End Test)
+
+실제 사용자 시나리오를 따라 전체 애플리케이션을 테스트한다.
+
+```javascript
+// e2e/checkout.test.js
+import { test, expect } from '@playwright/test'
+
+test.describe('결제 플로우', () => {
+  test('사용자가 상품을 구매할 수 있다', async ({ page }) => {
+    // 로그인
+    await page.goto('/login')
+    await page.fill('[data-testid="email"]', 'test@example.com')
+    await page.fill('[data-testid="password"]', 'password123')
+    await page.click('[data-testid="login-button"]')
+
+    // 상품 페이지로 이동
+    await page.goto('/products/1')
+    await page.click('[data-testid="add-to-cart"]')
+
+    // 장바구니 확인
+    await page.goto('/cart')
+    await expect(page.locator('[data-testid="cart-item"]')).toBeVisible()
+
+    // 결제 진행
+    await page.click('[data-testid="checkout-button"]')
+    await page.fill('[data-testid="card-number"]', '4111111111111111')
+    await page.fill('[data-testid="expiry"]', '12/25')
+    await page.fill('[data-testid="cvv"]', '123')
+    await page.click('[data-testid="pay-button"]')
+
+    // 결제 완료 확인
+    await expect(page.locator('[data-testid="success-message"]')).toContainText(
+      '주문이 완료되었습니다'
+    )
+  })
+})
+```
+
+## 실무에서 쓰이는 테스팅 패턴
+
+### 1. 테스트 더블 (Test Double)
+
+외부 의존성을 대체하는 가짜 객체들이다.
+
+```javascript
+// Mock: 호출 여부와 인자를 검증
+test('사용자 생성 시 이메일이 전송된다', async () => {
+  const mockEmailService = {
+    sendWelcomeEmail: jest.fn(),
+  }
+
+  const userService = new UserService(mockEmailService)
+  await userService.createUser('test@example.com', 'password')
+
+  expect(mockEmailService.sendWelcomeEmail).toHaveBeenCalledWith('test@example.com')
+})
+
+// Stub: 미리 정의된 응답을 반환
+test('존재하지 않는 사용자 조회 시 에러 처리', async () => {
+  const stubUserRepository = {
+    findById: jest.fn().mockResolvedValue(null),
+  }
+
+  const userService = new UserService(stubUserRepository)
+
+  await expect(userService.getUser('nonexistent')).rejects.toThrow('사용자를 찾을 수 없습니다')
+})
+
+// Spy: 기존 함수를 감시하면서 원래 동작 유지
+test('로그인 시 사용자 정보가 캐시된다', async () => {
+  const cacheService = new CacheService()
+  const cacheSpy = jest.spyOn(cacheService, 'set')
+
+  const authService = new AuthService(cacheService)
+  await authService.login('test@example.com', 'password')
+
+  expect(cacheSpy).toHaveBeenCalledWith('user:test@example.com', expect.any(Object))
+})
+```
+
+### 2. 비동기 코드 테스트
+
+```javascript
+// Promise 테스트
+test('API 호출 성공 시 데이터를 반환한다', async () => {
+  const mockFetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ id: 1, name: 'Test User' }),
+  })
+
+  global.fetch = mockFetch
+
+  const user = await fetchUser(1)
+  expect(user).toEqual({ id: 1, name: 'Test User' })
+})
+
+// 타이머 테스트
+test('3초 후 자동 로그아웃된다', () => {
+  jest.useFakeTimers()
+
+  const logoutSpy = jest.fn()
+  const authService = new AuthService(logoutSpy)
+
+  authService.startAutoLogout()
+
+  jest.advanceTimersByTime(3000)
+  expect(logoutSpy).toHaveBeenCalled()
+
+  jest.useRealTimers()
+})
+```
+
+### 3. 에러 처리 테스트
+
+```javascript
+// 동기 에러
+test('유효하지 않은 이메일 형식은 에러를 발생시킨다', () => {
+  expect(() => validateEmail('invalid-email')).toThrow('이메일 형식이 올바르지 않습니다')
+})
+
+// 비동기 에러
+test('네트워크 오류 시 적절한 에러를 발생시킨다', async () => {
+  const mockFetch = jest.fn().mockRejectedValue(new Error('Network error'))
+  global.fetch = mockFetch
+
+  await expect(fetchUser(1)).rejects.toThrow('사용자 정보를 불러올 수 없습니다')
+})
+```
+
+## 디버깅 기법과 도구
+
+### 1. 브라우저 개발자 도구 활용
+
+```javascript
+// 조건부 브레이크포인트
+function processItems(items) {
+  items.forEach((item, index) => {
+    // 개발자 도구에서 조건부 브레이크포인트 설정
+    // 조건: index === 5 || item.price > 10000
+    const result = calculateItemTotal(item)
+    updateDisplay(result)
+  })
+}
+
+// 디버깅을 위한 콘솔 활용
+function debugComplexCalculation(data) {
+  console.group('복잡한 계산 시작')
+  console.log('입력 데이터:', data)
+
+  const step1 = processStep1(data)
+  console.log('1단계 결과:', step1)
+
+  const step2 = processStep2(step1)
+  console.log('2단계 결과:', step2)
+
+  console.time('최종 계산')
+  const result = finalCalculation(step2)
+  console.timeEnd('최종 계산')
+
+  console.groupEnd()
+  return result
+}
+```
+
+### 2. 성능 디버깅
+
+```javascript
+// 메모리 누수 디버깅
+class ComponentManager {
+  constructor() {
+    this.components = new Map()
+    this.eventListeners = new Map()
+  }
+
+  addComponent(id, component) {
+    this.components.set(id, component)
+
+    // 메모리 누수 방지: 약한 참조 사용
+    const weakRef = new WeakRef(component)
+    this.eventListeners.set(id, weakRef)
+  }
+
+  removeComponent(id) {
+    const component = this.components.get(id)
+    if (component) {
+      // 이벤트 리스너 정리
+      component.removeAllListeners()
+      this.components.delete(id)
+      this.eventListeners.delete(id)
+    }
+  }
+
+  // 개발 환경에서만 사용하는 디버깅 메서드
+  debugMemoryUsage() {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('활성 컴포넌트 수:', this.components.size)
+      console.log('메모리 사용량:', performance.memory?.usedJSHeapSize || 'N/A')
+    }
+  }
+}
+```
+
+### 3. 네트워크 디버깅
+
+```javascript
+// API 호출 모니터링
+class APIClient {
+  constructor() {
+    this.interceptors = {
+      request: [],
+      response: [],
+    }
+  }
+
+  async request(url, options = {}) {
+    const startTime = performance.now()
+
+    try {
+      // 요청 인터셉터 실행
+      const processedOptions = this.interceptors.request.reduce(
+        (opts, interceptor) => interceptor(opts),
+        options
+      )
+
+      console.log(`🚀 API 요청: ${options.method || 'GET'} ${url}`)
+
+      const response = await fetch(url, processedOptions)
+      const endTime = performance.now()
+
+      console.log(`✅ API 응답: ${response.status} (${Math.round(endTime - startTime)}ms)`)
+
+      // 응답 인터셉터 실행
+      return this.interceptors.response.reduce((res, interceptor) => interceptor(res), response)
+    } catch (error) {
+      const endTime = performance.now()
+      console.error(`❌ API 에러: ${error.message} (${Math.round(endTime - startTime)}ms)`)
+      throw error
+    }
+  }
+}
+```
+
+## 실무에서 마주치는 테스팅 함정들
+
+### 1. 과도한 모킹
+
+```javascript
+// 잘못된 예: 모든 것을 모킹
+test('사용자 정보를 화면에 표시한다', () => {
+  const mockDate = jest.fn().mockReturnValue('2024-01-01')
+  const mockMath = { random: jest.fn().mockReturnValue(0.5) }
+  const mockDocument = { getElementById: jest.fn() }
+
+  // 너무 많은 모킹으로 실제 코드와 동떨어진 테스트
+})
+
+// 올바른 예: 필요한 부분만 모킹
+test('사용자 정보를 화면에 표시한다', async () => {
+  const mockUserService = {
+    getUser: jest.fn().mockResolvedValue({ name: 'Test User' }),
+  }
+
+  const userDisplay = new UserDisplay(mockUserService)
+  await userDisplay.show('user1')
+
+  expect(mockUserService.getUser).toHaveBeenCalledWith('user1')
+})
+```
+
+### 2. 테스트 코드의 중복
+
+```javascript
+// 중복 제거 전
+describe('사용자 검증', () => {
+  test('이메일 형식 검증', () => {
+    const user = { email: 'test@example.com', password: 'password123' }
+    expect(validateUser(user)).toBe(true)
+  })
+
+  test('패스워드 길이 검증', () => {
+    const user = { email: 'test@example.com', password: 'short' }
+    expect(validateUser(user)).toBe(false)
+  })
+})
+
+// 중복 제거 후
+describe('사용자 검증', () => {
+  const validUser = { email: 'test@example.com', password: 'password123' }
+
+  test.each([
+    ['유효한 이메일', validUser, true],
+    ['짧은 패스워드', { ...validUser, password: 'short' }, false],
+    ['잘못된 이메일', { ...validUser, email: 'invalid' }, false],
+  ])('%s: %o -> %s', (description, user, expected) => {
+    expect(validateUser(user)).toBe(expected)
+  })
+})
+```
+
+### 3. 플래키 테스트 (Flaky Test)
+
+```javascript
+// 문제 있는 테스트: 시간에 의존적
+test('1초 후 메시지가 표시된다', (done) => {
+  setTimeout(() => {
+    expect(document.getElementById('message')).toBeVisible()
+    done()
+  }, 1000)
+})
+
+// 개선된 테스트: 대기 조건 사용
+test('메시지가 표시될 때까지 대기한다', async () => {
+  await waitFor(() => {
+    expect(document.getElementById('message')).toBeVisible()
+  })
+})
+```
+
+## 성능 최적화 관점
+
+### 1. 테스트 병렬 실행
+
+```javascript
+// jest.config.js
+module.exports = {
+  maxWorkers: '50%', // CPU 코어의 50%만 사용
+  testEnvironment: 'jsdom',
+  setupFilesAfterEnv: ['<rootDir>/src/setupTests.js'],
+
+  // 테스트 파일 패턴 최적화
+  testMatch: [
+    '<rootDir>/src/**/__tests__/**/*.{js,jsx,ts,tsx}',
+    '<rootDir>/src/**/*.{spec,test}.{js,jsx,ts,tsx}',
+  ],
+
+  // 빠른 피드백을 위한 watch 모드 설정
+  watchman: true,
+}
+```
+
+### 2. 테스트 데이터 최적화
+
+```javascript
+// 테스트 데이터 팩토리 패턴
+class UserFactory {
+  static create(overrides = {}) {
+    return {
+      id: Math.random().toString(36),
+      email: 'test@example.com',
+      name: 'Test User',
+      createdAt: new Date().toISOString(),
+      ...overrides,
+    }
+  }
+
+  static createMany(count, overrides = {}) {
+    return Array.from({ length: count }, () => this.create(overrides))
+  }
+}
+
+// 사용 예
+test('사용자 목록을 올바르게 렌더링한다', () => {
+  const users = UserFactory.createMany(5)
+  const component = render(<UserList users={users} />)
+  expect(component.getAllByTestId('user-item')).toHaveLength(5)
+})
+```
+
+## 디버깅 체크리스트
+
+문제가 발생했을 때 순서대로 확인해야 할 것들:
+
+1. **에러 메시지 정확히 읽기**: 대부분의 정보는 에러 메시지에 있다
+2. **스택 트레이스 분석**: 어디서 에러가 발생했는지 파악
+3. **입력값 검증**: 함수나 API에 전달되는 값들 확인
+4. **네트워크 탭 확인**: API 호출 상태와 응답 데이터 점검
+5. **콘솔 로그 활용**: 의심스러운 지점에 로그 추가
+6. **브레이크포인트 설정**: 코드 실행 과정 단계별 확인
+7. **타입 검증**: TypeScript 사용 시 타입 에러 확인
+
+```javascript
+// 디버깅 헬퍼 함수
+function debugLog(message, data) {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[DEBUG] ${message}:`, data)
+  }
+}
+
+function assertType(value, expectedType, variableName = 'value') {
+  if (typeof value !== expectedType) {
+    throw new Error(`${variableName}은 ${expectedType} 타입이어야 합니다. 현재: ${typeof value}`)
+  }
+}
+
+// 사용 예
+function calculateTotal(items) {
+  debugLog('calculateTotal 입력', items)
+  assertType(items, 'object', 'items')
+
+  if (!Array.isArray(items)) {
+    throw new Error('items는 배열이어야 합니다')
+  }
+
+  const total = items.reduce((sum, item) => {
+    debugLog('처리 중인 아이템', item)
+    return sum + item.price * item.quantity
+  }, 0)
+
+  debugLog('계산된 총액', total)
+  return total
+}
+```
+
+테스팅과 디버깅은 개발자의 핵심 역량이다. 처음에는 시간이 많이 걸리는 것 같지만, 장기적으로 보면 개발 속도와 코드 품질을 크게 향상시킨다.
+
+기억해야 할 핵심:
+
+- 테스트는 버그를 찾는 것이 아니라 안정성을 보장하는 것
+- 모든 것을 테스트할 필요는 없다. 중요한 부분부터 시작하자
+- 디버깅 도구를 적극 활용하되, 체계적으로 접근하자
+- 테스트 코드도 유지보수 대상이다. 깔끔하게 작성하자
+
+다음번에 버그가 발생했을 때 당황하지 말고, 이 글에서 소개한 방법들을 차근차근 적용해보자. 분명히 더 빠르고 정확하게 문제를 해결할 수 있을 것이다.
+
+## 참고 자료
+
+- [Jest 공식 문서](https://jestjs.io/docs/getting-started)
+- [Playwright 테스팅 가이드](https://playwright.dev/docs/intro)
+- [Chrome DevTools 디버깅 가이드](https://developer.chrome.com/docs/devtools/javascript/)
+- [Testing Library 베스트 프랙티스](https://testing-library.com/docs/guiding-principles/)
+
+---
+
+_좋은 테스트와 효과적인 디버깅은 개발자의 자신감을 높여준다._
