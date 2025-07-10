@@ -1,0 +1,1313 @@
+---
+title: '프론트엔드 로깅 시스템 구축 - 사용자 문제를 빠르게 해결하는 모니터링 전략'
+date: '2025-01-11'
+lastmod: '2025-01-11'
+tags: ['logging']
+draft: false
+summary: '프론트엔드에서 효과적인 로깅 시스템을 구축하는 방법을 다룹니다. 에러 추적부터 사용자 행동 분석까지, 실무에서 바로 적용할 수 있는 로깅 전략과 도구들을 소개합니다.'
+images: ['/static/images/frontend-logging.png']
+---
+
+"사용자가 버그를 신고했는데 재현이 안 돼요." 이런 상황을 겪어본 적이 있다면, 프론트엔드 로깅의 중요성을 체감했을 것이다. 백엔드와 달리 프론트엔드는 사용자의 브라우저에서 실행되므로, 문제가 발생해도 우리가 직접 확인하기 어렵다.
+
+사용자는 "페이지가 안 열려요"라고 말하지만, 실제로는 어떤 에러가 발생했는지, 어떤 브라우저를 사용하는지, 어떤 순서로 클릭했는지 알 수 없다. 그렇다고 매번 사용자에게 "개발자 도구를 열어서 콘솔을 확인해 주세요"라고 할 수는 없다.
+
+이 글에서는 **프론트엔드에서 체계적인 로깅 시스템을 구축하는 방법**을 알아보자. 단순히 `console.log`를 넘어서, 실제 사용자 문제를 빠르게 파악하고 해결할 수 있는 **실무 중심의 로깅 전략**이다.
+
+<TOCInline toc={props.toc} exclude="" />
+
+## 프론트엔드 로깅이 왜 필요한가?
+
+백엔드 로깅과 프론트엔드 로깅은 목적과 방식이 다르다. 백엔드는 서버에서 발생하는 모든 것을 기록하지만, 프론트엔드는 **사용자의 실제 경험**을 추적해야 한다.
+
+### 프론트엔드 로깅의 핵심 목적
+
+**1. 에러 추적과 디버깅**
+사용자 환경에서 발생하는 JavaScript 에러, 네트워크 에러, 렌더링 에러 등을 추적
+
+**2. 사용자 행동 분석**
+사용자가 어떤 순서로 기능을 사용하는지, 어디서 이탈하는지 분석
+
+**3. 성능 모니터링**
+페이지 로딩 시간, 사용자 상호작용 응답 시간, 메모리 사용량 등 추적
+
+**4. 비즈니스 메트릭**
+전환율, 기능 사용률, A/B 테스트 결과 등 비즈니스 의사결정을 위한 데이터
+
+### 프론트엔드 로깅의 특수성
+
+**1. 브라우저 환경의 다양성**
+Chrome, Safari, Firefox, Edge 등 다양한 브라우저와 버전에서 동작
+
+**2. 네트워크 불안정성**
+모바일 네트워크, 느린 연결, 연결 끊김 등 다양한 네트워크 상황
+
+**3. 사용자 개인정보 보호**
+민감한 정보는 로깅하지 않도록 주의
+
+**4. 성능 영향 최소화**
+로깅 자체가 사용자 경험을 해치지 않도록 최적화
+
+## 로깅 시스템 아키텍처
+
+효과적인 프론트엔드 로깅 시스템은 여러 레이어로 구성된다.
+
+### 1. 로그 수집 레이어
+
+```javascript
+// 로그 수집의 핵심 클래스
+class Logger {
+  constructor(config) {
+    this.config = {
+      level: 'info',
+      endpoint: '/api/logs',
+      bufferSize: 100,
+      flushInterval: 5000,
+      enableConsole: process.env.NODE_ENV === 'development',
+      ...config,
+    }
+
+    this.buffer = []
+    this.sessionId = this.generateSessionId()
+    this.userId = null
+
+    // 주기적으로 로그 전송
+    this.startFlushTimer()
+
+    // 페이지 언로드 시 남은 로그 전송
+    window.addEventListener('beforeunload', () => {
+      this.flush(true)
+    })
+  }
+
+  // 로그 레벨별 메서드
+  debug(message, data = {}) {
+    this.log('debug', message, data)
+  }
+
+  info(message, data = {}) {
+    this.log('info', message, data)
+  }
+
+  warn(message, data = {}) {
+    this.log('warn', message, data)
+  }
+
+  error(message, data = {}) {
+    this.log('error', message, data)
+  }
+
+  // 핵심 로깅 메서드
+  log(level, message, data = {}) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      data,
+      sessionId: this.sessionId,
+      userId: this.userId,
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+      // 추가 컨텍스트 정보
+      ...this.getContextInfo(),
+    }
+
+    // 개발 환경에서는 콘솔에도 출력
+    if (this.config.enableConsole) {
+      console[level](message, data)
+    }
+
+    // 버퍼에 추가
+    this.buffer.push(logEntry)
+
+    // 버퍼가 가득 차면 즉시 전송
+    if (this.buffer.length >= this.config.bufferSize) {
+      this.flush()
+    }
+  }
+
+  // 컨텍스트 정보 수집
+  getContextInfo() {
+    return {
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      },
+      screen: {
+        width: window.screen.width,
+        height: window.screen.height,
+      },
+      connection: navigator.connection
+        ? {
+            effectiveType: navigator.connection.effectiveType,
+            downlink: navigator.connection.downlink,
+          }
+        : null,
+      memory: performance.memory
+        ? {
+            used: performance.memory.usedJSHeapSize,
+            total: performance.memory.totalJSHeapSize,
+          }
+        : null,
+    }
+  }
+
+  // 로그 전송
+  async flush(isBeforeUnload = false) {
+    if (this.buffer.length === 0) return
+
+    const logs = [...this.buffer]
+    this.buffer = []
+
+    try {
+      if (isBeforeUnload && navigator.sendBeacon) {
+        // 페이지 언로드 시 beacon API 사용
+        navigator.sendBeacon(this.config.endpoint, JSON.stringify(logs))
+      } else {
+        // 일반적인 경우 fetch 사용
+        await fetch(this.config.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(logs),
+        })
+      }
+    } catch (error) {
+      // 전송 실패 시 로컬 스토리지에 임시 저장
+      this.storeLogsLocally(logs)
+    }
+  }
+
+  // 로컬 스토리지에 로그 저장 (재시도용)
+  storeLogsLocally(logs) {
+    try {
+      const stored = localStorage.getItem('pendingLogs')
+      const existing = stored ? JSON.parse(stored) : []
+      const combined = [...existing, ...logs]
+
+      // 너무 많이 쌓이지 않도록 제한
+      const limited = combined.slice(-1000)
+      localStorage.setItem('pendingLogs', JSON.stringify(limited))
+    } catch (error) {
+      // 로컬 스토리지 실패 시 무시
+    }
+  }
+
+  // 세션 ID 생성
+  generateSessionId() {
+    return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+  }
+
+  // 타이머 시작
+  startFlushTimer() {
+    setInterval(() => {
+      this.flush()
+    }, this.config.flushInterval)
+  }
+}
+
+// 싱글톤 인스턴스 생성
+const logger = new Logger({
+  endpoint: process.env.REACT_APP_LOGGING_ENDPOINT || '/api/logs',
+  level: process.env.NODE_ENV === 'development' ? 'debug' : 'info',
+})
+
+export default logger
+```
+
+### 2. 에러 추적 레이어
+
+```javascript
+// 에러 추적 전용 클래스
+class ErrorTracker {
+  constructor(logger) {
+    this.logger = logger
+    this.setupErrorHandlers()
+  }
+
+  setupErrorHandlers() {
+    // JavaScript 에러 추적
+    window.addEventListener('error', (event) => {
+      this.logError({
+        type: 'javascript_error',
+        message: event.message,
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+        stack: event.error?.stack,
+      })
+    })
+
+    // Promise rejection 추적
+    window.addEventListener('unhandledrejection', (event) => {
+      this.logError({
+        type: 'unhandled_promise_rejection',
+        message: event.reason?.message || 'Unhandled promise rejection',
+        stack: event.reason?.stack,
+      })
+    })
+
+    // 리소스 로딩 에러 추적
+    window.addEventListener(
+      'error',
+      (event) => {
+        if (event.target !== window) {
+          this.logError({
+            type: 'resource_error',
+            message: `Failed to load resource: ${event.target.src || event.target.href}`,
+            element: event.target.tagName,
+            source: event.target.src || event.target.href,
+          })
+        }
+      },
+      true
+    )
+  }
+
+  // 에러 로깅 (중복 제거 포함)
+  logError(errorInfo) {
+    const errorKey = this.generateErrorKey(errorInfo)
+
+    // 같은 에러가 짧은 시간 내에 반복되는 것 방지
+    if (this.isRecentDuplicate(errorKey)) {
+      return
+    }
+
+    this.logger.error('Application Error', {
+      ...errorInfo,
+      timestamp: new Date().toISOString(),
+      errorKey,
+      breadcrumbs: this.getBreadcrumbs(),
+    })
+  }
+
+  // 에러 키 생성 (중복 판단용)
+  generateErrorKey(errorInfo) {
+    const key = `${errorInfo.type}-${errorInfo.message}-${errorInfo.filename}-${errorInfo.lineno}`
+    return btoa(key).substr(0, 16)
+  }
+
+  // 최근 중복 에러 체크
+  isRecentDuplicate(errorKey) {
+    const now = Date.now()
+    const recent = this.recentErrors || {}
+
+    if (recent[errorKey] && now - recent[errorKey] < 5000) {
+      return true
+    }
+
+    recent[errorKey] = now
+    this.recentErrors = recent
+    return false
+  }
+
+  // 브레드크럼 (사용자 행동 이력) 가져오기
+  getBreadcrumbs() {
+    return window.breadcrumbs || []
+  }
+}
+
+// React 에러 바운더리
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error, errorInfo) {
+    logger.error('React Error Boundary', {
+      error: {
+        message: error.message,
+        stack: error.stack,
+      },
+      errorInfo,
+      componentStack: errorInfo.componentStack,
+    })
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-fallback">
+          <h2>문제가 발생했습니다</h2>
+          <p>페이지를 새로고침해 주세요.</p>
+          <button onClick={() => window.location.reload()}>새로고침</button>
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
+}
+```
+
+### 3. 사용자 행동 추적 레이어
+
+```javascript
+// 사용자 행동 추적 클래스
+class UserBehaviorTracker {
+  constructor(logger) {
+    this.logger = logger
+    this.breadcrumbs = []
+    this.maxBreadcrumbs = 50
+    this.setupBehaviorTracking()
+  }
+
+  setupBehaviorTracking() {
+    // 클릭 이벤트 추적
+    document.addEventListener('click', (event) => {
+      this.addBreadcrumb({
+        type: 'click',
+        target: this.getElementSelector(event.target),
+        text: event.target.textContent?.trim().substr(0, 50) || '',
+        timestamp: new Date().toISOString(),
+      })
+    })
+
+    // 페이지 이동 추적
+    this.trackPageViews()
+
+    // 폼 제출 추적
+    this.trackFormSubmissions()
+
+    // 스크롤 추적 (throttled)
+    this.trackScrolling()
+  }
+
+  // 브레드크럼 추가
+  addBreadcrumb(breadcrumb) {
+    this.breadcrumbs.push(breadcrumb)
+
+    // 최대 개수 제한
+    if (this.breadcrumbs.length > this.maxBreadcrumbs) {
+      this.breadcrumbs.shift()
+    }
+
+    // 전역에서 접근 가능하도록
+    window.breadcrumbs = this.breadcrumbs
+
+    // 중요한 이벤트는 즉시 로깅
+    if (breadcrumb.type === 'error' || breadcrumb.type === 'form_submit') {
+      this.logger.info('User Action', breadcrumb)
+    }
+  }
+
+  // 엘리먼트 셀렉터 생성
+  getElementSelector(element) {
+    if (element.id) return `#${element.id}`
+    if (element.className) return `.${element.className.split(' ')[0]}`
+    return element.tagName.toLowerCase()
+  }
+
+  // 페이지 뷰 추적
+  trackPageViews() {
+    // 초기 페이지 뷰
+    this.logPageView()
+
+    // SPA 라우트 변경 추적
+    const originalPushState = history.pushState
+    const originalReplaceState = history.replaceState
+
+    history.pushState = function (...args) {
+      originalPushState.apply(history, args)
+      setTimeout(() => this.logPageView(), 0)
+    }.bind(this)
+
+    history.replaceState = function (...args) {
+      originalReplaceState.apply(history, args)
+      setTimeout(() => this.logPageView(), 0)
+    }.bind(this)
+
+    window.addEventListener('popstate', () => {
+      setTimeout(() => this.logPageView(), 0)
+    })
+  }
+
+  // 페이지 뷰 로깅
+  logPageView() {
+    const pageInfo = {
+      url: window.location.href,
+      title: document.title,
+      referrer: document.referrer,
+      timestamp: new Date().toISOString(),
+    }
+
+    this.addBreadcrumb({
+      type: 'page_view',
+      ...pageInfo,
+    })
+
+    this.logger.info('Page View', pageInfo)
+  }
+
+  // 폼 제출 추적
+  trackFormSubmissions() {
+    document.addEventListener('submit', (event) => {
+      const form = event.target
+      const formData = new FormData(form)
+
+      // 민감한 정보 제외하고 폼 필드 추적
+      const fields = {}
+      for (const [key, value] of formData.entries()) {
+        if (!this.isSensitiveField(key)) {
+          fields[key] = typeof value === 'string' ? value.length : 'file'
+        }
+      }
+
+      this.addBreadcrumb({
+        type: 'form_submit',
+        formId: form.id || 'unknown',
+        fields,
+        timestamp: new Date().toISOString(),
+      })
+    })
+  }
+
+  // 민감한 필드 판단
+  isSensitiveField(fieldName) {
+    const sensitiveFields = [
+      'password',
+      'passwd',
+      'pwd',
+      'ssn',
+      'social',
+      'credit',
+      'card',
+      'cvv',
+      'cvc',
+    ]
+
+    return sensitiveFields.some((sensitive) => fieldName.toLowerCase().includes(sensitive))
+  }
+
+  // 스크롤 추적 (throttled)
+  trackScrolling() {
+    let lastScrollTime = 0
+    let maxScroll = 0
+
+    const trackScroll = () => {
+      const now = Date.now()
+      if (now - lastScrollTime < 1000) return
+
+      const scrollPercent = Math.round(
+        (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100
+      )
+
+      if (scrollPercent > maxScroll) {
+        maxScroll = scrollPercent
+
+        this.addBreadcrumb({
+          type: 'scroll',
+          scrollPercent,
+          timestamp: new Date().toISOString(),
+        })
+      }
+
+      lastScrollTime = now
+    }
+
+    window.addEventListener('scroll', trackScroll)
+  }
+}
+```
+
+### 4. 성능 모니터링 레이어
+
+```javascript
+// 성능 모니터링 클래스
+class PerformanceMonitor {
+  constructor(logger) {
+    this.logger = logger
+    this.setupPerformanceTracking()
+  }
+
+  setupPerformanceTracking() {
+    // 페이지 로딩 성능 추적
+    window.addEventListener('load', () => {
+      setTimeout(() => this.logPagePerformance(), 0)
+    })
+
+    // Core Web Vitals 추적
+    this.trackCoreWebVitals()
+
+    // 리소스 로딩 성능 추적
+    this.trackResourcePerformance()
+
+    // 사용자 상호작용 성능 추적
+    this.trackInteractionPerformance()
+  }
+
+  // 페이지 로딩 성능 로깅
+  logPagePerformance() {
+    const navigation = performance.getEntriesByType('navigation')[0]
+    if (!navigation) return
+
+    const metrics = {
+      dns: navigation.domainLookupEnd - navigation.domainLookupStart,
+      tcp: navigation.connectEnd - navigation.connectStart,
+      ssl:
+        navigation.secureConnectionStart > 0
+          ? navigation.connectEnd - navigation.secureConnectionStart
+          : 0,
+      ttfb: navigation.responseStart - navigation.requestStart,
+      domLoad: navigation.domContentLoadedEventEnd - navigation.navigationStart,
+      pageLoad: navigation.loadEventEnd - navigation.navigationStart,
+      domElements: document.querySelectorAll('*').length,
+    }
+
+    this.logger.info('Page Performance', metrics)
+  }
+
+  // Core Web Vitals 추적
+  trackCoreWebVitals() {
+    // LCP (Largest Contentful Paint)
+    new PerformanceObserver((entryList) => {
+      const entries = entryList.getEntries()
+      const lastEntry = entries[entries.length - 1]
+
+      this.logger.info('LCP', {
+        value: lastEntry.startTime,
+        element: lastEntry.element?.tagName || 'unknown',
+      })
+    }).observe({ type: 'largest-contentful-paint', buffered: true })
+
+    // FID (First Input Delay)
+    new PerformanceObserver((entryList) => {
+      entryList.getEntries().forEach((entry) => {
+        this.logger.info('FID', {
+          value: entry.processingStart - entry.startTime,
+          eventType: entry.name,
+        })
+      })
+    }).observe({ type: 'first-input', buffered: true })
+
+    // CLS (Cumulative Layout Shift)
+    let clsValue = 0
+    new PerformanceObserver((entryList) => {
+      entryList.getEntries().forEach((entry) => {
+        if (!entry.hadRecentInput) {
+          clsValue += entry.value
+        }
+      })
+
+      this.logger.info('CLS', { value: clsValue })
+    }).observe({ type: 'layout-shift', buffered: true })
+  }
+
+  // 리소스 로딩 성능 추적
+  trackResourcePerformance() {
+    const observer = new PerformanceObserver((list) => {
+      list.getEntries().forEach((entry) => {
+        // 느린 리소스만 로깅
+        if (entry.duration > 1000) {
+          this.logger.warn('Slow Resource', {
+            name: entry.name,
+            type: entry.initiatorType,
+            duration: entry.duration,
+            size: entry.transferSize,
+          })
+        }
+      })
+    })
+
+    observer.observe({ entryTypes: ['resource'] })
+  }
+
+  // 사용자 상호작용 성능 추적
+  trackInteractionPerformance() {
+    let interactionStart = 0
+
+    // 클릭 시작 시간 기록
+    document.addEventListener('mousedown', () => {
+      interactionStart = performance.now()
+    })
+
+    // 클릭 응답 시간 측정
+    document.addEventListener('click', (event) => {
+      if (interactionStart > 0) {
+        const duration = performance.now() - interactionStart
+
+        // 느린 상호작용만 로깅
+        if (duration > 100) {
+          this.logger.warn('Slow Interaction', {
+            duration,
+            target: event.target.tagName,
+            targetClass: event.target.className,
+          })
+        }
+
+        interactionStart = 0
+      }
+    })
+  }
+}
+```
+
+## 실무 적용 가이드
+
+### 1. 단계별 도입 전략
+
+**1단계: 기본 에러 추적**
+
+```javascript
+// 최소한의 에러 추적부터 시작
+import logger from './logger'
+
+// 전역 에러 핸들러 설정
+window.addEventListener('error', (event) => {
+  logger.error('JavaScript Error', {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+    stack: event.error?.stack,
+  })
+})
+
+// React 에러 바운더리 적용
+function App() {
+  return (
+    <ErrorBoundary>
+      <Routes>{/* 라우트들 */}</Routes>
+    </ErrorBoundary>
+  )
+}
+```
+
+**2단계: 사용자 행동 추적**
+
+```javascript
+// 주요 사용자 액션 추적
+const trackUserAction = (action, data) => {
+  logger.info('User Action', {
+    action,
+    data,
+    timestamp: new Date().toISOString(),
+  })
+}
+
+// 컴포넌트에서 사용
+function LoginForm() {
+  const handleSubmit = (formData) => {
+    trackUserAction('login_attempt', {
+      email: formData.email ? 'provided' : 'missing',
+    })
+
+    try {
+      // 로그인 로직
+      trackUserAction('login_success')
+    } catch (error) {
+      trackUserAction('login_failed', { error: error.message })
+    }
+  }
+}
+```
+
+**3단계: 성능 모니터링**
+
+```javascript
+// 성능 지표 추적
+const trackPerformance = (metric, value) => {
+  logger.info('Performance', {
+    metric,
+    value,
+    timestamp: new Date().toISOString(),
+  })
+}
+
+// 페이지 로딩 시간 추적
+window.addEventListener('load', () => {
+  const loadTime = performance.timing.loadEventEnd - performance.timing.navigationStart
+  trackPerformance('page_load_time', loadTime)
+})
+```
+
+### 2. 로깅 최적화 전략
+
+**배치 전송**
+
+```javascript
+// 로그를 모아서 한 번에 전송
+class LogBatcher {
+  constructor(maxSize = 100, maxWait = 5000) {
+    this.batch = []
+    this.maxSize = maxSize
+    this.maxWait = maxWait
+    this.timer = null
+  }
+
+  add(logEntry) {
+    this.batch.push(logEntry)
+
+    if (this.batch.length >= this.maxSize) {
+      this.flush()
+    } else if (!this.timer) {
+      this.timer = setTimeout(() => this.flush(), this.maxWait)
+    }
+  }
+
+  flush() {
+    if (this.batch.length === 0) return
+
+    const logs = [...this.batch]
+    this.batch = []
+
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+
+    this.sendLogs(logs)
+  }
+
+  async sendLogs(logs) {
+    try {
+      await fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(logs),
+      })
+    } catch (error) {
+      // 전송 실패 시 로컬 스토리지에 저장
+      this.storeLogsLocally(logs)
+    }
+  }
+}
+```
+
+**샘플링**
+
+```javascript
+// 모든 로그를 전송하지 않고 일부만 샘플링
+class SamplingLogger {
+  constructor(sampleRate = 0.1) {
+    this.sampleRate = sampleRate
+  }
+
+  shouldLog(level) {
+    // 에러는 항상 로깅
+    if (level === 'error') return true
+
+    // 나머지는 샘플링
+    return Math.random() < this.sampleRate
+  }
+
+  log(level, message, data) {
+    if (this.shouldLog(level)) {
+      // 실제 로깅 로직
+      this.sendLog(level, message, data)
+    }
+  }
+}
+```
+
+### 3. 개인정보 보호 고려사항
+
+```javascript
+// 민감한 정보 필터링
+class PrivacyFilter {
+  constructor() {
+    this.sensitiveKeys = [
+      'password',
+      'token',
+      'secret',
+      'key',
+      'ssn',
+      'social',
+      'credit',
+      'card',
+      'email',
+      'phone',
+      'address',
+    ]
+  }
+
+  filterSensitiveData(data) {
+    if (typeof data !== 'object' || data === null) {
+      return data
+    }
+
+    const filtered = {}
+
+    for (const [key, value] of Object.entries(data)) {
+      if (this.isSensitiveKey(key)) {
+        filtered[key] = '[FILTERED]'
+      } else if (typeof value === 'object') {
+        filtered[key] = this.filterSensitiveData(value)
+      } else {
+        filtered[key] = value
+      }
+    }
+
+    return filtered
+  }
+
+  isSensitiveKey(key) {
+    return this.sensitiveKeys.some((sensitive) => key.toLowerCase().includes(sensitive))
+  }
+}
+
+// 사용 예시
+const privacyFilter = new PrivacyFilter()
+
+logger.info(
+  'Form Submit',
+  privacyFilter.filterSensitiveData({
+    email: 'user@example.com', // [FILTERED]
+    name: 'John Doe', // 유지
+    password: 'secret123', // [FILTERED]
+  })
+)
+```
+
+## 로깅 분석과 활용
+
+### 1. 대시보드 구축
+
+```javascript
+// 로그 분석을 위한 쿼리 예시
+const logAnalytics = {
+  // 에러 발생률 추적
+  async getErrorRate(timeRange) {
+    const totalLogs = await this.getLogCount(timeRange)
+    const errorLogs = await this.getLogCount(timeRange, { level: 'error' })
+
+    return {
+      rate: errorLogs / totalLogs,
+      total: totalLogs,
+      errors: errorLogs,
+    }
+  },
+
+  // 가장 많이 발생하는 에러 타입
+  async getTopErrors(timeRange, limit = 10) {
+    const errorLogs = await this.getLogs(timeRange, { level: 'error' })
+    const errorCounts = {}
+
+    errorLogs.forEach((log) => {
+      const key = `${log.message}-${log.data?.filename || 'unknown'}`
+      errorCounts[key] = (errorCounts[key] || 0) + 1
+    })
+
+    return Object.entries(errorCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, limit)
+      .map(([error, count]) => ({ error, count }))
+  },
+
+  // 사용자 여정 분석
+  async getUserJourney(sessionId) {
+    const logs = await this.getLogs(null, { sessionId })
+
+    return logs
+      .filter((log) => log.data?.type === 'page_view' || log.data?.type === 'click')
+      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+      .map((log) => ({
+        timestamp: log.timestamp,
+        action: log.data?.type,
+        details: log.data,
+      }))
+  },
+}
+```
+
+### 2. 알림 및 모니터링
+
+```javascript
+// 실시간 알림 시스템
+class AlertSystem {
+  constructor() {
+    this.thresholds = {
+      errorRate: 0.05, // 5% 이상 에러율
+      slowResponse: 1000, // 1초 이상 응답 시간
+      memoryUsage: 0.8, // 80% 이상 메모리 사용
+    }
+
+    this.recentErrors = new Map()
+    this.recentMetrics = new Map()
+  }
+
+  checkErrorRate() {
+    const recentErrors = Array.from(this.recentErrors.values())
+    const errorRate = recentErrors.length / 100 // 최근 100개 요청 중 에러율
+
+    if (errorRate > this.thresholds.errorRate) {
+      this.sendAlert('high_error_rate', {
+        rate: errorRate,
+        threshold: this.thresholds.errorRate,
+        recentErrors: recentErrors.slice(-5), // 최근 5개 에러 샘플
+      })
+    }
+  }
+
+  checkPerformance(metric, value) {
+    if (metric === 'response_time' && value > this.thresholds.slowResponse) {
+      this.sendAlert('slow_response', {
+        value,
+        threshold: this.thresholds.slowResponse,
+      })
+    }
+  }
+
+  async sendAlert(type, data) {
+    // Slack, 이메일, 웹훅 등으로 알림 전송
+    try {
+      await fetch('/api/alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type,
+          data,
+          timestamp: new Date().toISOString(),
+          url: window.location.href,
+        }),
+      })
+    } catch (error) {
+      console.error('Failed to send alert:', error)
+    }
+  }
+}
+```
+
+### 3. A/B 테스트 로깅
+
+```javascript
+// A/B 테스트 결과 추적
+class ABTestLogger {
+  constructor(logger) {
+    this.logger = logger
+    this.activeTests = new Map()
+  }
+
+  // 실험 참여 로깅
+  participateInExperiment(experimentId, variant) {
+    this.activeTests.set(experimentId, variant)
+
+    this.logger.info('AB Test Participation', {
+      experimentId,
+      variant,
+      timestamp: new Date().toISOString(),
+    })
+  }
+
+  // 실험 결과 로깅
+  logExperimentResult(experimentId, event, data = {}) {
+    const variant = this.activeTests.get(experimentId)
+
+    if (variant) {
+      this.logger.info('AB Test Result', {
+        experimentId,
+        variant,
+        event,
+        data,
+        timestamp: new Date().toISOString(),
+      })
+    }
+  }
+
+  // 전환 이벤트 로깅
+  logConversion(experimentId, conversionType, value = null) {
+    this.logExperimentResult(experimentId, 'conversion', {
+      conversionType,
+      value,
+    })
+  }
+}
+
+// 사용 예시
+const abTestLogger = new ABTestLogger(logger)
+
+// 버튼 색상 A/B 테스트
+function ProductButton({ productId }) {
+  const [variant, setVariant] = useState(null)
+
+  useEffect(() => {
+    // 실험 참여
+    const buttonVariant = Math.random() < 0.5 ? 'blue' : 'green'
+    setVariant(buttonVariant)
+
+    abTestLogger.participateInExperiment('button_color_test', buttonVariant)
+  }, [])
+
+  const handleClick = () => {
+    // 클릭 이벤트 로깅
+    abTestLogger.logExperimentResult('button_color_test', 'click', {
+      productId,
+    })
+
+    // 구매 로직...
+  }
+
+  const handlePurchase = () => {
+    // 전환 이벤트 로깅
+    abTestLogger.logConversion('button_color_test', 'purchase', productId)
+  }
+
+  return (
+    <button
+      style={{ backgroundColor: variant === 'blue' ? '#007bff' : '#28a745' }}
+      onClick={handleClick}
+    >
+      구매하기
+    </button>
+  )
+}
+```
+
+## 로깅 도구와 서비스
+
+### 1. 오픈소스 솔루션
+
+**Sentry**
+
+```javascript
+import * as Sentry from '@sentry/react'
+
+Sentry.init({
+  dsn: process.env.REACT_APP_SENTRY_DSN,
+  environment: process.env.NODE_ENV,
+  tracesSampleRate: 1.0,
+  integrations: [new Sentry.BrowserTracing()],
+})
+
+// 커스텀 에러 로깅
+Sentry.captureException(new Error('Something went wrong'))
+
+// 브레드크럼 추가
+Sentry.addBreadcrumb({
+  message: 'User clicked button',
+  category: 'user-action',
+  level: 'info',
+})
+```
+
+**LogRocket**
+
+```javascript
+import LogRocket from 'logrocket'
+
+LogRocket.init('your-app-id')
+
+// 사용자 식별
+LogRocket.identify('user-123', {
+  name: 'John Doe',
+  email: 'john@example.com',
+})
+
+// 커스텀 이벤트 로깅
+LogRocket.track('Button Clicked', {
+  buttonId: 'purchase-button',
+  product: 'premium-plan',
+})
+```
+
+### 2. 커스텀 솔루션
+
+**Elasticsearch + Kibana**
+
+```javascript
+// Elasticsearch로 로그 전송
+class ElasticsearchLogger {
+  constructor(endpoint, index) {
+    this.endpoint = endpoint
+    this.index = index
+  }
+
+  async sendLogs(logs) {
+    const body = logs.flatMap((log) => [
+      { index: { _index: this.index } },
+      {
+        ...log,
+        '@timestamp': new Date().toISOString(),
+      },
+    ])
+
+    await fetch(`${this.endpoint}/_bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body.map((item) => JSON.stringify(item)).join('\n') + '\n',
+    })
+  }
+}
+```
+
+## 실무에서 마주치는 함정들
+
+### 1. 과도한 로깅
+
+```javascript
+// 나쁜 예: 모든 것을 로깅
+function Button({ onClick }) {
+  const handleClick = () => {
+    logger.debug('Button clicked')
+    logger.info('Starting onClick handler')
+
+    onClick()
+
+    logger.info('Finished onClick handler')
+    logger.debug('Button click completed')
+  }
+
+  return <button onClick={handleClick}>Click me</button>
+}
+
+// 좋은 예: 의미 있는 이벤트만 로깅
+function Button({ onClick }) {
+  const handleClick = () => {
+    try {
+      onClick()
+    } catch (error) {
+      logger.error('Button click failed', {
+        error: error.message,
+        stack: error.stack,
+      })
+    }
+  }
+
+  return <button onClick={handleClick}>Click me</button>
+}
+```
+
+### 2. 민감한 정보 로깅
+
+```javascript
+// 위험한 예: 민감한 정보 포함
+logger.info('User login', {
+  email: 'user@example.com',
+  password: 'plaintext-password', // 절대 안됨!
+  creditCard: '1234-5678-9012-3456', // 절대 안됨!
+})
+
+// 안전한 예: 민감한 정보 제외
+logger.info('User login', {
+  userId: 'user-123',
+  loginMethod: 'email',
+  success: true,
+})
+```
+
+### 3. 성능 영향
+
+```javascript
+// 문제가 있는 예: 동기식 로깅
+function heavyComputation(data) {
+  const start = performance.now()
+
+  // 무거운 계산...
+  const result = processData(data)
+
+  const duration = performance.now() - start
+
+  // 동기식으로 로그 전송 (블로킹!)
+  sendLogSync({ operation: 'heavy_computation', duration })
+
+  return result
+}
+
+// 개선된 예: 비동기 로깅
+function heavyComputation(data) {
+  const start = performance.now()
+
+  // 무거운 계산...
+  const result = processData(data)
+
+  const duration = performance.now() - start
+
+  // 비동기로 로그 전송 (논블로킹)
+  setTimeout(() => {
+    logger.info('Heavy Computation', { duration })
+  }, 0)
+
+  return result
+}
+```
+
+## 로깅 베스트 프랙티스
+
+### 1. 구조화된 로깅
+
+```javascript
+// 일관된 로그 구조 사용
+const logEntry = {
+  timestamp: new Date().toISOString(),
+  level: 'info',
+  message: 'User action completed',
+  category: 'user-interaction',
+  data: {
+    action: 'button-click',
+    component: 'purchase-button',
+    userId: 'user-123',
+    sessionId: 'session-456',
+  },
+  context: {
+    url: window.location.href,
+    userAgent: navigator.userAgent,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    },
+  },
+}
+```
+
+### 2. 로그 레벨 활용
+
+```javascript
+// 적절한 로그 레벨 사용
+logger.debug('Detailed debugging information') // 개발 시에만
+logger.info('General information') // 일반적인 정보
+logger.warn('Warning condition') // 주의 필요
+logger.error('Error occurred') // 에러 발생
+logger.fatal('Critical system failure') // 치명적 오류
+```
+
+### 3. 컨텍스트 정보 포함
+
+```javascript
+// 풍부한 컨텍스트 정보 포함
+function logUserAction(action, details) {
+  logger.info('User Action', {
+    action,
+    details,
+    context: {
+      userId: getCurrentUserId(),
+      sessionId: getSessionId(),
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+      referrer: document.referrer,
+      userAgent: navigator.userAgent,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      language: navigator.language,
+    },
+  })
+}
+```
+
+프론트엔드 로깅 시스템은 **사용자 경험을 개선하고 문제를 빠르게 해결하는 핵심 도구**다. 하지만 무분별한 로깅은 오히려 성능 저하와 개인정보 침해를 일으킬 수 있다.
+
+중요한 것은 **목적에 맞는 적절한 수준의 로깅**을 구현하는 것이다. 에러 추적, 사용자 행동 분석, 성능 모니터링 등 각각의 목적에 맞는 로깅 전략을 수립하고, 단계적으로 도입해야 한다.
+
+기억해야 할 핵심:
+
+- 에러 추적부터 시작해서 점진적으로 확장
+- 사용자 개인정보 보호 최우선
+- 성능 영향 최소화
+- 의미 있는 데이터만 수집
+- 수집된 데이터를 실제 문제 해결에 활용
+
+다음번에 사용자가 "버그가 있어요"라고 연락했을 때, 당황하지 말고 로깅 시스템을 통해 **정확한 상황을 파악하고 빠르게 해결**해보자. 분명히 더 안정적이고 사용자 친화적인 서비스를 만들 수 있을 것이다.
+
+## 참고 자료
+
+- [Sentry 공식 문서](https://docs.sentry.io/platforms/javascript/)
+- [LogRocket 가이드](https://docs.logrocket.com/)
+- [Web Vitals 측정](https://web.dev/vitals/)
+- [Privacy-First Analytics](https://plausible.io/privacy-focused-web-analytics)
+
+---
+
+_로깅은 사용자를 이해하고 제품을 개선하는 출발점이다. 적절한 로깅 전략으로 더 나은 사용자 경험을 만들어보자._
